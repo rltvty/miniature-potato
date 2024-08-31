@@ -4,6 +4,8 @@ use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::view::RenderLayers;
 
+/// Player movement speed factor.
+const PLAYER_SPEED: f32 = 10.;
 
 fn main() {
     App::new()
@@ -17,8 +19,26 @@ fn main() {
                 spawn_text,
             ),
         )
-        .add_systems(Update, (move_player, change_fov))
+        .add_systems(
+            Update, (
+                move_player, 
+                change_fov, 
+                quit_on_esc_system,
+            )
+        )
         .run();
+}
+
+fn quit_on_esc_system(
+    _: Commands,
+    kb_input: Res<ButtonInput<KeyCode>>,
+    mut exit: EventWriter<AppExit>,
+) {
+    // Check if the Escape key is pressed
+    if kb_input.just_pressed(KeyCode::Escape) {
+        // Send the exit event to quit the game
+        exit.send(AppExit::Success);
+    }
 }
 
 #[derive(Debug, Component)]
@@ -164,8 +184,8 @@ fn spawn_text(mut commands: Commands) {
             parent.spawn(TextBundle::from_section(
                 concat!(
                     "Move the camera with your mouse.\n",
-                    "Press arrow up to decrease the FOV of the world model.\n",
-                    "Press arrow down to increase the FOV of the world model."
+                    "Press - or _ to decrease the FOV of the world model.\n",
+                    "Press + or = to increase the FOV of the world model."
                 ),
                 TextStyle {
                     font_size: 25.0,
@@ -176,16 +196,59 @@ fn spawn_text(mut commands: Commands) {
 }
 
 fn move_player(
-    mut mouse_motion: EventReader<MouseMotion>,
     mut player: Query<&mut Transform, With<Player>>,
+    time: Res<Time>,
+    mut mouse_motion: EventReader<MouseMotion>,
+    kb_input: Res<ButtonInput<KeyCode>>,
+    
 ) {
-    let mut transform = player.single_mut();
+    let Ok(mut player) = player.get_single_mut() else {
+        return;
+    };
+
+    let mut direction = Vec3::ZERO;
+
+    if kb_input.pressed(KeyCode::KeyW) {
+        direction.z -= 1.;
+    }
+
+    if kb_input.pressed(KeyCode::KeyS) {
+        direction.z += 1.;
+    }
+
+    if kb_input.pressed(KeyCode::KeyA) {
+        direction.x -= 1.;
+    }
+
+    if kb_input.pressed(KeyCode::KeyD) {
+        direction.x += 1.;
+    }
+
+    // Progressively update the player's position over time. Normalize the
+    // direction vector to prevent it from exceeding a magnitude of 1 when
+    // moving diagonally.
+    let move_delta = direction.normalize_or_zero() * PLAYER_SPEED * time.delta_seconds();
+
+    // Get the player's forward direction vector (in the XZ plane)
+    let forward = player.rotation * Vec3::Z;
+    let right = player.rotation * Vec3::X;
+
+    // Ignore the Y component (only consider X and Z)
+    let forward_xz = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
+    let right_xz = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
+
+    // Calculate the movement in the XZ plane
+    let move_delta = forward_xz * move_delta.z + right_xz * move_delta.x;
+    
+    // Apply the movement to the player's translation
+    player.translation += move_delta;
+
     for motion in mouse_motion.read() {
         let yaw = -motion.delta.x * 0.003;
         let pitch = -motion.delta.y * 0.002;
         // Order of rotations is important, see <https://gamedev.stackexchange.com/a/136175/103059>
-        transform.rotate_y(yaw);
-        transform.rotate_local_x(pitch);
+        player.rotate_y(yaw);
+        player.rotate_local_x(pitch);
     }
 }
 
@@ -200,11 +263,11 @@ fn change_fov(
         );
     };
 
-    if input.pressed(KeyCode::ArrowUp) {
+    if input.pressed(KeyCode::Equal) {
         perspective.fov -= 1.0_f32.to_radians();
         perspective.fov = perspective.fov.max(20.0_f32.to_radians());
     }
-    if input.pressed(KeyCode::ArrowDown) {
+    if input.pressed(KeyCode::Minus) {
         perspective.fov += 1.0_f32.to_radians();
         perspective.fov = perspective.fov.min(160.0_f32.to_radians());
     }
