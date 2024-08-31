@@ -1,0 +1,29 @@
+[package]
+name = "miniature-potato"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Enable Fast Compiles (Optional)
+# Bevy can be built just fine using default configuration on stable Rust. Unfortunately, 
+# the compile times are rather long. This section explains how to speed up iterative  
+# compiles: the amount of time it takes to rebuild your project after changing a single file.
+bevy = { version = "0.14.1", features = ["dynamic_linking"] }
+bevy_dylib = { version = "0.14.1" }
+
+# Improve Runtime Performance (Optional)
+# Bevy's dependencies do a lot of trace logging that is not relevant for an end user. 
+# To improve your runtime performance, you can add the following to the [dependencies] 
+# section of your Cargo.toml. It will disable detailed log levels on compile time so 
+# that they do not need to be filtered out while your app is running.
+log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }
+
+# Enable a small amount of optimization in the dev profile.
+[profile.dev]
+opt-level = 1
+
+# Enable a large amount of optimization in the dev profile for dependencies.
+[profile.dev.package."*"]
+opt-level = 3
+
+
