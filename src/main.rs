@@ -4,12 +4,14 @@ use bevy::prelude::*;
 use bevy::render::view::RenderLayers;
 
 pub mod player;
+pub mod potato;
 pub mod terrain;
 pub mod turbine;
 
 use player::*;
 use terrain::*;
 use turbine::*;
+use potato::PotatoPlugin;
 
 fn main() {
     App::new()
@@ -19,6 +21,7 @@ fn main() {
             // Enables debug rendering
             PhysicsDebugPlugin::default(),
             PlayerPlugin,
+            PotatoPlugin,
         ))
         // Overwrite default debug rendering configuration (optional)
         .insert_gizmo_config(

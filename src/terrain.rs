@@ -55,14 +55,15 @@ pub fn setup_terrain(
 
     // Spawn terrain entity
     commands.spawn((
+        RigidBody::Static,
+        Collider::half_space(Vec3::Y),
+        //Collider::convex_decomposition_from_mesh(&terrain_mesh).unwrap(),
         PbrBundle {
             mesh: meshes.add(terrain_mesh),
             material: materials.add(Color::from(tailwind::LIME_500)),
             transform: Transform::from_xyz(-50.0, 0.0, -50.0),
             ..Default::default()
         },
-        RigidBody::Static,
-        Collider::half_space(Vec3::Y),
     ));
 
     // Spawn a little platform for the player to jump on.

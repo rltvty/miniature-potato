@@ -1,3 +1,4 @@
+use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::render::{
     render_asset::RenderAssetUsages,
@@ -51,16 +52,20 @@ fn spawn_wind_turbine(
     });
 
     // Tower (Cylinder)
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(Cylinder {
-            radius: 0.3,
-            half_height: 4.0,
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Mesh::from(Cylinder {
+                radius: 0.3,
+                half_height: 4.0,
+                ..Default::default()
+            })),
+            material: debug_material.clone(),
+            transform: Transform::from_translation(position + Vec3::new(0.0, 4.0, 0.0)),
             ..Default::default()
-        })),
-        material: debug_material.clone(),
-        transform: Transform::from_translation(position + Vec3::new(0.0, 4.0, 0.0)),
-        ..Default::default()
-    });
+        },
+        RigidBody::Static,
+        Collider::cylinder(0.3, 8.0)
+    ));
 
     // Nacelle (Cube)
     commands.spawn(PbrBundle {
