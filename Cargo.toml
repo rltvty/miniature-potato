@@ -4,11 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+avian3d = "0.1.2"
 # Enable Fast Compiles (Optional)
 # Bevy can be built just fine using default configuration on stable Rust. Unfortunately, 
 # the compile times are rather long. This section explains how to speed up iterative  
 # compiles: the amount of time it takes to rebuild your project after changing a single file.
 bevy = { version = "0.14.1", features = ["dynamic_linking"] }
+bevy-tnua = "0.19.0"
+bevy-tnua-avian3d = "0.1.1"
 bevy_dylib = { version = "0.14.1" }
 
 # Improve Runtime Performance (Optional)
@@ -17,6 +20,7 @@ bevy_dylib = { version = "0.14.1" }
 # section of your Cargo.toml. It will disable detailed log levels on compile time so 
 # that they do not need to be filtered out while your app is running.
 log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }
+noise = "0.9.0"
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]

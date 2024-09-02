@@ -1,12 +1,19 @@
 use bevy::color::palettes::tailwind;
-use bevy::input::mouse::MouseMotion;
+use bevy::input::mouse::*;
 use bevy::pbr::NotShadowCaster;
-use bevy::prelude::*;
+use bevy::{color::palettes::css, prelude::*};
 use bevy::render::view::RenderLayers;
 use bevy::render::{
     render_asset::RenderAssetUsages,
     render_resource::{Extent3d, TextureDimension, TextureFormat},
+    render_resource::PrimitiveTopology,
 };
+
+
+use noise::{NoiseFn, Perlin};
+use avian3d::prelude::*;
+use bevy_tnua::prelude::*;
+use bevy_tnua_avian3d::*;
 
 
 /// Player movement speed factor.
@@ -14,7 +21,24 @@ const PLAYER_SPEED: f32 = 10.;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins((
+            DefaultPlugins, 
+            PhysicsPlugins::default(),
+            // Enables debug rendering
+            PhysicsDebugPlugin::default(),
+            // We need both Tnua's main controller plugin, and the plugin to connect to the physics
+            // backend (in this case XBPD-3D)
+            TnuaControllerPlugin::default(),
+            TnuaAvian3dPlugin::default(),
+        ))
+        // Overwrite default debug rendering configuration (optional)
+        .insert_gizmo_config(
+            PhysicsGizmos {
+                aabb_color: Some(Color::WHITE),
+                ..default()
+            },
+            GizmoConfig::default(),
+        )
         .add_systems(
             Startup,
             (
@@ -23,12 +47,15 @@ fn main() {
                 spawn_lights,
                 spawn_text,
                 setup_wind_turbines,
+                setup_terrain,
             ),
         )
         .add_systems(
             Update, (
-                move_player, 
-                change_fov, 
+                player_look,
+                player_move, 
+                player_fov,
+                player_grow_shrink,
                 quit_on_esc_system,
                 rotate_blades,
             )
@@ -74,10 +101,27 @@ fn spawn_view_model(
     commands
         .spawn((
             Player,
-            SpatialBundle {
-                transform: Transform::from_xyz(0.0, 1.0, 0.0),
-                ..default()
+            PbrBundle {
+                mesh: meshes.add(Capsule3d {
+                    radius: 0.5,
+                    half_length: 0.5,
+                }),
+                material: materials.add(Color::from(css::DARK_CYAN)),
+                transform: Transform::from_xyz(0.0, 2.0, 0.0),
+                ..Default::default()
             },
+            // The player character needs to be configured as a dynamic rigid body of the physics
+            // engine.
+            RigidBody::Dynamic,
+            Collider::capsule(0.5, 1.0),
+            // This bundle holds the main components.
+            TnuaControllerBundle::default(),
+            // A sensor shape is not strictly necessary, but without it we'll get weird results.
+            TnuaAvian3dSensorShape(Collider::cylinder(0.49, 0.0)),
+            // Tnua can fix the rotation, but the character will still get rotated before it can do so.
+            // By locking the rotation we can prevent this.
+            LockedAxes::ROTATION_LOCKED,
+            RenderLayers::layer(VIEW_MODEL_RENDER_LAYER),
         ))
         .with_children(|parent| {
             parent.spawn((
@@ -127,23 +171,78 @@ fn spawn_view_model(
         });
 }
 
+
+fn player_move(keyboard: Res<ButtonInput<KeyCode>>, mut controller: Query<(&mut TnuaController, &Transform), With<Player>>) {
+    
+    let Ok((mut controller, transform)) = controller.get_single_mut() else {
+        return;
+    };
+    
+    let mut direction = Vec3::ZERO;
+
+    if keyboard.any_pressed([KeyCode::ArrowUp, KeyCode::KeyW]) {
+        direction -= Vec3::Z;
+    }
+    if keyboard.any_pressed([KeyCode::ArrowDown, KeyCode::KeyS]) {
+        direction += Vec3::Z;
+    }
+    if keyboard.any_pressed([KeyCode::ArrowLeft, KeyCode::KeyA]) {
+        direction -= Vec3::X;
+    }
+    if keyboard.any_pressed([KeyCode::ArrowRight, KeyCode::KeyD]) {
+        direction += Vec3::X;
+    }
+
+    // NOTE: Restricting the player movement to XZ plane might be incorrect
+    // after there are slopes the player must navigate up and down.
+
+    // Get the player's forward direction vector (in the XZ plane)
+    let forward = transform.rotation * Vec3::Z;
+    let right = transform.rotation * Vec3::X;
+
+    // Ignore the Y component (only consider X and Z)
+    let forward_xz = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
+    let right_xz = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
+
+    // Calculate the movement in the XZ plane
+    let direction = forward_xz * direction.z + right_xz * direction.x;
+
+    // Feed the basis every frame. Even if the player doesn't move - just use `desired_velocity:
+    // Vec3::ZERO`. `TnuaController` starts without a basis, which will make the character collider
+    // just fall.
+    controller.basis(TnuaBuiltinWalk {
+        // The `desired_velocity` determines how the character will move.
+        desired_velocity: direction.normalize_or_zero() * 10.0,
+        // The `float_height` must be greater (even if by little) from the distance between the
+        // character's center and the lowest point of its collider.
+        float_height: 1.5,
+        // `TnuaBuiltinWalk` has many other fields for customizing the movement - but they have
+        // sensible defaults. Refer to the `TnuaBuiltinWalk`'s documentation to learn what they do.
+        ..Default::default()
+    });
+
+    // Feed the jump action every frame as long as the player holds the jump button. If the player
+    // stops holding the jump button, simply stop feeding the action.
+    if keyboard.any_pressed([KeyCode::Backspace, KeyCode::Backspace]) {
+        controller.action(TnuaBuiltinJump {
+            // The height is the only mandatory field of the jump button.
+            height: 4.0,
+            // `TnuaBuiltinJump` also has customization fields with sensible defaults.
+            ..Default::default()
+        });
+    }
+
+}
+
+
 fn spawn_world_model(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let floor = meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(10.0)));
+    // let floor = meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(10.0)));
     let cube = meshes.add(Cuboid::new(2.0, 0.5, 1.0));
     let material = materials.add(Color::WHITE);
-
-    // The world model camera will render the floor and the cubes spawned in this system.
-    // Assigning no `RenderLayers` component defaults to layer 0.
-
-    commands.spawn(MaterialMeshBundle {
-        mesh: floor,
-        material: material.clone(),
-        ..default()
-    });
 
     commands.spawn(MaterialMeshBundle {
         mesh: cube.clone(),
@@ -164,11 +263,11 @@ fn spawn_lights(mut commands: Commands) {
     commands.spawn((
         PointLightBundle {
             point_light: PointLight {
-                color: Color::from(tailwind::ROSE_300),
+                color: Color::from(tailwind::YELLOW_300),
                 shadows_enabled: true,
                 ..default()
             },
-            transform: Transform::from_xyz(-2.0, 4.0, -0.75),
+            transform: Transform::from_xyz(-2.0, 14.0, -0.75),
             ..default()
         },
         // The light source illuminates both the world model and the view model.
@@ -191,8 +290,8 @@ fn spawn_text(mut commands: Commands) {
             parent.spawn(TextBundle::from_section(
                 concat!(
                     "Move the camera with your mouse.\n",
-                    "Press - or _ to decrease the FOV of the world model.\n",
-                    "Press + or = to increase the FOV of the world model."
+                    "Use the scroll-wheel to change the FOV\n",
+                    "Use WASD to move. Use +/- to get taller/shorter."
                 ),
                 TextStyle {
                     font_size: 25.0,
@@ -202,53 +301,14 @@ fn spawn_text(mut commands: Commands) {
         });
 }
 
-fn move_player(
+
+fn player_look(
     mut player: Query<&mut Transform, With<Player>>,
-    time: Res<Time>,
     mut mouse_motion: EventReader<MouseMotion>,
-    kb_input: Res<ButtonInput<KeyCode>>,
-    
 ) {
     let Ok(mut player) = player.get_single_mut() else {
         return;
     };
-
-    let mut direction = Vec3::ZERO;
-
-    if kb_input.pressed(KeyCode::KeyW) {
-        direction.z -= 1.;
-    }
-
-    if kb_input.pressed(KeyCode::KeyS) {
-        direction.z += 1.;
-    }
-
-    if kb_input.pressed(KeyCode::KeyA) {
-        direction.x -= 1.;
-    }
-
-    if kb_input.pressed(KeyCode::KeyD) {
-        direction.x += 1.;
-    }
-
-    // Progressively update the player's position over time. Normalize the
-    // direction vector to prevent it from exceeding a magnitude of 1 when
-    // moving diagonally.
-    let move_delta = direction.normalize_or_zero() * PLAYER_SPEED * time.delta_seconds();
-
-    // Get the player's forward direction vector (in the XZ plane)
-    let forward = player.rotation * Vec3::Z;
-    let right = player.rotation * Vec3::X;
-
-    // Ignore the Y component (only consider X and Z)
-    let forward_xz = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
-    let right_xz = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
-
-    // Calculate the movement in the XZ plane
-    let move_delta = forward_xz * move_delta.z + right_xz * move_delta.x;
-    
-    // Apply the movement to the player's translation
-    player.translation += move_delta;
 
     for motion in mouse_motion.read() {
         let yaw = -motion.delta.x * 0.003;
@@ -259,8 +319,8 @@ fn move_player(
     }
 }
 
-fn change_fov(
-    input: Res<ButtonInput<KeyCode>>,
+fn player_fov(
+    mut mouse_wheel: EventReader<MouseWheel>,
     mut world_model_projection: Query<&mut Projection, With<WorldModelCamera>>,
 ) {
     let mut projection = world_model_projection.single_mut();
@@ -270,14 +330,45 @@ fn change_fov(
         );
     };
 
-    if input.pressed(KeyCode::Equal) {
-        perspective.fov -= 1.0_f32.to_radians();
-        perspective.fov = perspective.fov.max(20.0_f32.to_radians());
+    for wheel in mouse_wheel.read() {
+        if wheel.y  > 0.0 {
+            perspective.fov -= 1.0_f32.to_radians();
+            perspective.fov = perspective.fov.max(20.0_f32.to_radians());
+        }
+        else if wheel.y < 0.0 {
+            perspective.fov += 1.0_f32.to_radians();
+            perspective.fov = perspective.fov.min(160.0_f32.to_radians());
+        }
     }
-    if input.pressed(KeyCode::Minus) {
-        perspective.fov += 1.0_f32.to_radians();
-        perspective.fov = perspective.fov.min(160.0_f32.to_radians());
+}
+
+fn player_grow_shrink(
+    mut transform: Query<&mut Transform, With<WorldModelCamera>>,
+    time: Res<Time>,
+    kb_input: Res<ButtonInput<KeyCode>>,
+    
+) {
+    let Ok(mut transform) = transform.get_single_mut() else {
+        return;
+    };
+
+    let mut direction = Vec3::ZERO;
+
+    if kb_input.pressed(KeyCode::Minus) {
+        direction.y -= 1.;
     }
+
+    if kb_input.pressed(KeyCode::Equal) {
+        direction.y += 1.;
+    }
+
+    // Progressively update the player's position over time. Normalize the
+    // direction vector to prevent it from exceeding a magnitude of 1 when
+    // moving diagonally.
+    let move_delta = direction.normalize_or_zero() * PLAYER_SPEED * time.delta_seconds();
+    
+    // Apply the movement to the player's translation
+    transform.translation += move_delta;
 }
 
 fn setup_wind_turbines(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, mut images: ResMut<Assets<Image>>) {
@@ -397,4 +488,73 @@ fn uv_debug_texture() -> Image {
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::RENDER_WORLD,
     )
+}
+
+
+
+fn generate_procedural_terrain_mesh(size: usize, scale: f64) -> Mesh {
+    let perlin = Perlin::new(42);
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+
+    // Generate vertices
+    for z in 0..size {
+        for x in 0..size {
+            let height = perlin.get([x as f64 * scale, z as f64 * scale]) as f32;
+            vertices.push([x as f32, height, z as f32]);
+        }
+    }
+
+    // Generate indices
+    for z in 0..(size - 1) {
+        for x in 0..(size - 1) {
+            let i = z * size + x;
+
+            // First triangle of the quad
+            indices.push(i as u32);
+            indices.push((i + 1) as u32);
+            indices.push((i + size) as u32);
+
+            // Second triangle of the quad
+            indices.push((i + 1) as u32);
+            indices.push((i + size + 1) as u32);
+            indices.push((i + size) as u32);
+        }
+    }
+
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vertices)
+    .with_inserted_indices(bevy::render::mesh::Indices::U32(indices))
+    .with_duplicated_vertices()
+    .with_computed_flat_normals()
+
+}
+
+fn setup_terrain(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
+    // Generate procedural terrain mesh
+    let terrain_mesh = generate_procedural_terrain_mesh(100, 0.2);
+
+    // Spawn terrain entity
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(terrain_mesh),
+            material: materials.add(Color::from(tailwind::LIME_500)),
+            transform: Transform::from_xyz(-50.0, 0.0, -50.0),
+            ..Default::default()
+        },
+        RigidBody::Static,
+        Collider::half_space(Vec3::Y),
+    ));
+
+    // Spawn a little platform for the player to jump on.
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Cuboid::new(4.0, 1.0, 4.0)),
+            material: materials.add(Color::from(css::GRAY)),
+            transform: Transform::from_xyz(-6.0, 2.0, 0.0),
+            ..Default::default()
+        },
+        RigidBody::Static,
+        Collider::cuboid(4.0, 1.0, 4.0),
+    ));
 }
