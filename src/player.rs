@@ -51,6 +51,9 @@ fn player_setup(
     let arm = meshes.add(Cuboid::new(0.1, 0.1, 0.5));
     let arm_material = materials.add(Color::from(tailwind::TEAL_200));
 
+    let body = meshes.add(Capsule3d::new(10.0, 40.0));
+    let body_material = materials.add(Color::from(tailwind::FUCHSIA_900));
+
     commands
         .spawn((
             Player,
@@ -60,7 +63,7 @@ fn player_setup(
                     half_length: 0.5,
                 }),
                 material: materials.add(Color::from(css::DARK_CYAN)),
-                transform: Transform::from_xyz(0.0, 2.0, 0.0),
+                transform: Transform::from_xyz(0.0, 1000.0, 0.0),
                 ..Default::default()
             },
             // The player character needs to be configured as a dynamic rigid body of the physics
@@ -119,6 +122,18 @@ fn player_setup(
                 // Ensure the arm is only rendered by the view model camera.
                 RenderLayers::layer(VIEW_MODEL_RENDER_LAYER),
                 // The arm is free-floating, so shadows would look weird.
+                NotShadowCaster,
+            ));
+
+            // Spawn the player's body.
+            parent.spawn((
+                MaterialMeshBundle {
+                    mesh: body,
+                    material: body_material,
+                    transform: Transform::from_xyz(0.0, 2.0, 0.0),
+                    ..default()
+                },
+                RenderLayers::layer(DEFAULT_RENDER_LAYER),
                 NotShadowCaster,
             ));
         });
