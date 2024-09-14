@@ -1,41 +1,67 @@
 use avian3d::prelude::*;
+use bevy::color::palettes::tailwind;
 use bevy::prelude::*;
 use bevy::render::{
     render_asset::RenderAssetUsages,
     render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
+use bevy::render::view::RenderLayers;
+use player::Player;
+use rand::Rng;
 
-pub fn setup_wind_turbines(
+use player::DEFAULT_RENDER_LAYER;
+
+use crate::player;
+
+#[derive(Resource)]
+pub struct DropCooldown {
+    timer: Timer,
+}
+
+impl Default for DropCooldown {
+    fn default() -> Self {
+        DropCooldown {
+            timer: Timer::from_seconds(1.0, TimerMode::Once),
+        }
+    }
+}
+
+pub fn drop_wind_turbine(
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut cooldown: ResMut<DropCooldown>,
+    mut query: Query<&Transform, With<Player>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    // Spawn multiple wind turbines at different positions
-    spawn_wind_turbine(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        &mut images,
-        Vec3::new(0.0, 0.0, 0.0),
-        1.0,
-    );
-    spawn_wind_turbine(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        &mut images,
-        Vec3::new(3.0, 0.0, 10.0),
-        1.2,
-    );
-    spawn_wind_turbine(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        &mut images,
-        Vec3::new(-3.0, 0.0, -10.0),
-        0.8,
-    );
+    let Ok(transform) = query.get_single_mut() else {
+        return;
+    };
+
+    // Update the cooldown timer
+    cooldown.timer.tick(time.delta());
+
+    // Check if the key is pressed and if the timer has finished
+    if keyboard.just_pressed(KeyCode::KeyT) && cooldown.timer.finished() {
+        println!("Dropping Turbine at {}", transform.translation);
+
+        let mut rng = rand::thread_rng();
+        let random_float: f32 = rng.gen_range(0.5..1.0);
+
+        spawn_wind_turbine(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut images,
+            transform.translation + Vec3 { x: 2.0, y: -2.0, z: 2.0 },
+            random_float,
+        );
+
+        // Reset the timer after the turbine is dropped
+        cooldown.timer.reset();
+    }
 }
 
 fn spawn_wind_turbine(
@@ -53,37 +79,44 @@ fn spawn_wind_turbine(
 
     // Tower (Cylinder)
     commands.spawn((
-        PbrBundle {
+        MaterialMeshBundle {
             mesh: meshes.add(Mesh::from(Cylinder {
-                radius: 0.3,
-                half_height: 4.0,
+                radius: 3.0,
+                half_height: 40.0,
                 ..Default::default()
             })),
             material: debug_material.clone(),
-            transform: Transform::from_translation(position + Vec3::new(0.0, 4.0, 0.0)),
-            ..Default::default()
+            transform: Transform::from_translation(position + Vec3::new(0.0, 40.0, 0.0)),
+            ..default()
         },
-        RigidBody::Static,
-        Collider::cylinder(0.3, 8.0)
+
+        RenderLayers::layer(DEFAULT_RENDER_LAYER),
+        // RigidBody::Dynamic,
+        // Collider::cylinder(0.3, 8.0),
     ));
 
     // Nacelle (Cube)
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(Cuboid {
-            half_size: Vec3::new(0.5, 0.5, 1.0),
-        })),
-        material: debug_material.clone(),
-        transform: Transform {
-            translation: position + Vec3::new(0.0, 8.5, 0.0),
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Mesh::from(Cuboid {
+                half_size: Vec3::new(5.0, 5.0, 10.0),
+            })),
+            material: debug_material.clone(),
+            transform: Transform {
+                translation: position + Vec3::new(0.0, 85.0, 0.0),
+                ..Default::default()
+            },
             ..Default::default()
         },
-        ..Default::default()
-    });
+        RenderLayers::layer(DEFAULT_RENDER_LAYER),
+        // RigidBody::Dynamic,
+        // Collider::cuboid(1.0, 1.0, 2.0),
+    ));
 
     // Blades (Cylinder)
-    let blade_length = 4.0;
-    let blade_thickness = 0.1;
-    let blade_axis_position = position + Vec3::new(0.0, 8.5, 1.1);
+    let blade_length = 40.0;
+    let blade_thickness = 1.0;
+    let blade_axis_position = position + Vec3::new(0.0, 85.0, 11.0);
 
     for i in 0..3 {
         let angle = (i as f32) * (2.0 * std::f32::consts::PI / 3.0);
@@ -98,16 +131,22 @@ fn spawn_wind_turbine(
         };
 
         commands
-            .spawn(PbrBundle {
-                mesh: meshes.add(Mesh::from(Cylinder {
-                    radius: blade_thickness,
-                    half_height: blade_length / 2.0,
+            .spawn((
+                PbrBundle {
+                    mesh: meshes.add(Mesh::from(Cylinder {
+                        radius: blade_thickness,
+                        half_height: blade_length / 2.0,
+                        ..Default::default()
+                    })),
+                    material: debug_material.clone(),
+                    transform: blade_transform,
                     ..Default::default()
-                })),
-                material: debug_material.clone(),
-                transform: blade_transform,
-                ..Default::default()
-            })
+                },
+                RenderLayers::layer(DEFAULT_RENDER_LAYER),
+                // RigidBody::Dynamic,
+                // Collider::cylinder(blade_thickness, blade_length),
+            )
+        )
             .insert(Blade) // Insert Blade component
             .insert(RotationSpeed(rotation_speed)); // Assign rotation speed to the blade
     }
@@ -127,7 +166,7 @@ pub fn rotate_blades(
         let delta_rotation = Quat::from_rotation_z(time.delta_seconds() * rotation_speed.0);
 
         // Calculate the pivot point (the end of the blade)
-        let pivot = transform.translation - transform.rotation * Vec3::new(0.0, 2.0, 0.0);
+        let pivot = transform.translation - transform.rotation * Vec3::new(0.0, 20.0, 0.0);
 
         // Rotate around the pivot point
         transform.rotate_around(pivot, delta_rotation);

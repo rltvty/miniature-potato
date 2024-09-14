@@ -41,7 +41,7 @@ impl Plugin for PlayerPlugin {
 }
 
 #[derive(Debug, Component)]
-struct Player;
+pub struct Player;
 
 fn player_setup(
     mut commands: Commands,

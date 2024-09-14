@@ -20,6 +20,7 @@ use potato::PotatoPlugin;
 
 fn main() {
     App::new()
+        .insert_resource(DropCooldown::default())
         .add_plugins((
             DefaultPlugins,
             GltfInfoPlugin,
@@ -41,7 +42,7 @@ fn main() {
             Startup,
             (spawn_lights, spawn_text, spawn_world_window) //, setup_wind_turbines, setup_terrain),
         )
-        .add_systems(Update, (quit_on_esc_system, rotate_blades))
+        .add_systems(Update, (quit_on_esc_system, rotate_blades, drop_wind_turbine))
         .run();
 }
 
@@ -113,7 +114,7 @@ fn spawn_world_window(mut commands: Commands) {
                 ..default()
             }
             .into(),
-            transform: Transform::from_xyz(1000.0, 2000.0, 1000.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(700.0, 1200.0, 700.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
     ));
