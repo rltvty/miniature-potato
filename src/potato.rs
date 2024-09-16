@@ -1,15 +1,16 @@
-use bevy::prelude::*;
-use bevy::gltf::{Gltf, GltfMesh};
-use avian3d::prelude::*;
-use glft_info::GltfInfoComponent;
 use crate::glft_info;
+use avian3d::prelude::*;
+use bevy::gltf::{Gltf, GltfMesh};
+use bevy::prelude::*;
 use bevy::render::mesh::Mesh;
+use glft_info::GltfInfoComponent;
 
 pub struct PotatoPlugin;
 
 impl Plugin for PotatoPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup).add_systems(Update, process_mesh_load);
+        app.add_systems(Startup, setup)
+            .add_systems(Update, process_mesh_load);
     }
 }
 
@@ -19,33 +20,33 @@ struct Potato {
     initalized: bool,
 }
 
-fn setup(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-) {
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let gltf_handle = asset_server.load("potato-1.glb");
 
-    commands.spawn_empty().insert(GltfInfoComponent { handle: gltf_handle.clone() });
+    commands.spawn_empty().insert(GltfInfoComponent {
+        handle: gltf_handle.clone(),
+    });
 
     // Instead of trying to load the mesh directly, we defer this to a system that checks for the loaded asset
-    commands.spawn_empty().insert(Potato { gltf_handle, initalized: false });
+    commands.spawn_empty().insert(Potato {
+        gltf_handle,
+        initalized: false,
+    });
 }
-
-
 
 // System that waits for the mesh to be loaded
 fn process_mesh_load(
     mut commands: Commands,
     mut query: Query<&mut Potato>,
-    gltf_assets: Res<Assets<Gltf>>,  // Loaded GLTF assets
-    gltf_mesh_assets: Res<Assets<GltfMesh>>,  // Access to GltfMeshes
-    mesh_assets: Res<Assets<Mesh>>,  // Access to loaded Meshes
+    gltf_assets: Res<Assets<Gltf>>,          // Loaded GLTF assets
+    gltf_mesh_assets: Res<Assets<GltfMesh>>, // Access to GltfMeshes
+    mesh_assets: Res<Assets<Mesh>>,          // Access to loaded Meshes
 ) {
     for mut potato in query.iter_mut() {
         if potato.initalized {
             continue;
         }
-        let handle = &potato.gltf_handle; 
+        let handle = &potato.gltf_handle;
         if let Some(gltf) = gltf_assets.get(handle) {
             let mut mesh: Option<&Mesh> = Option::None;
             let mut scene_handle: Option<&Handle<Scene>> = Option::None;

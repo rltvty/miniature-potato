@@ -1,15 +1,10 @@
-use avian3d::prelude::*;
-use bevy::color::palettes::tailwind;
 use bevy::prelude::*;
 use bevy::render::{
     render_asset::RenderAssetUsages,
     render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
-use bevy::render::view::RenderLayers;
 use player::Player;
 use rand::Rng;
-
-use player::DEFAULT_RENDER_LAYER;
 
 use crate::player;
 
@@ -55,7 +50,12 @@ pub fn drop_wind_turbine(
             &mut meshes,
             &mut materials,
             &mut images,
-            transform.translation + Vec3 { x: 2.0, y: -2.0, z: 2.0 },
+            transform.translation
+                + Vec3 {
+                    x: 2.0,
+                    y: -2.0,
+                    z: 2.0,
+                },
             random_float,
         );
 
@@ -89,8 +89,6 @@ fn spawn_wind_turbine(
             transform: Transform::from_translation(position + Vec3::new(0.0, 40.0, 0.0)),
             ..default()
         },
-
-        RenderLayers::layer(DEFAULT_RENDER_LAYER),
         // RigidBody::Dynamic,
         // Collider::cylinder(0.3, 8.0),
     ));
@@ -108,7 +106,6 @@ fn spawn_wind_turbine(
             },
             ..Default::default()
         },
-        RenderLayers::layer(DEFAULT_RENDER_LAYER),
         // RigidBody::Dynamic,
         // Collider::cuboid(1.0, 1.0, 2.0),
     ));
@@ -142,11 +139,9 @@ fn spawn_wind_turbine(
                     transform: blade_transform,
                     ..Default::default()
                 },
-                RenderLayers::layer(DEFAULT_RENDER_LAYER),
                 // RigidBody::Dynamic,
                 // Collider::cylinder(blade_thickness, blade_length),
-            )
-        )
+            ))
             .insert(Blade) // Insert Blade component
             .insert(RotationSpeed(rotation_speed)); // Assign rotation speed to the blade
     }

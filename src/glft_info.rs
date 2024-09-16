@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use bevy::gltf::{Gltf, GltfMesh};
+use bevy::prelude::*;
 use std::collections::HashSet;
 
 // Custom component to store the GLTF handle for each entity
@@ -11,25 +11,24 @@ pub struct GltfInfoComponent {
 // Resource to keep track of the GLTF handles we have already printed debug info for
 #[derive(Resource, Default)]
 pub struct PrintedHandles {
-    pub handles: HashSet<Handle<Gltf>>,  // A set to track printed handles
+    pub handles: HashSet<Handle<Gltf>>, // A set to track printed handles
 }
 
 pub struct GltfInfoPlugin;
 
 impl Plugin for GltfInfoPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .insert_resource(PrintedHandles::default())  // Insert the resource to track printed handles
+        app.insert_resource(PrintedHandles::default()) // Insert the resource to track printed handles
             .add_systems(Update, print_gltf_info);
     }
 }
 
 fn print_gltf_info(
-    mut printed_handles: ResMut<PrintedHandles>,  // Resource to track printed handles
+    mut printed_handles: ResMut<PrintedHandles>, // Resource to track printed handles
     query: Query<(&GltfInfoComponent, Entity)>,  // Query for entities with GltfInfoComponent
-    gltf_assets: Res<Assets<Gltf>>,  // Loaded GLTF assets
-    gltf_mesh_assets: Res<Assets<GltfMesh>>,  // Access to GltfMeshes
-    mesh_assets: Res<Assets<Mesh>>,  // Access to loaded Meshes
+    gltf_assets: Res<Assets<Gltf>>,              // Loaded GLTF assets
+    gltf_mesh_assets: Res<Assets<GltfMesh>>,     // Access to GltfMeshes
+    mesh_assets: Res<Assets<Mesh>>,              // Access to loaded Meshes
 ) {
     for (gltf_info_component, entity) in query.iter() {
         let handle = &gltf_info_component.handle;
@@ -48,7 +47,10 @@ fn print_gltf_info(
                         // GltfMesh contains `primitives`, which are the actual meshes.
                         for primitive in &gltf_mesh.primitives {
                             if let Some(mesh) = mesh_assets.get(&primitive.mesh) {
-                                println!("Primitive mesh loaded with vertex count: {}", mesh.count_vertices());
+                                println!(
+                                    "Primitive mesh loaded with vertex count: {}",
+                                    mesh.count_vertices()
+                                );
                             } else {
                                 println!("Primitive mesh not yet loaded.");
                             }

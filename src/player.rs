@@ -1,26 +1,35 @@
 use avian3d::prelude::*;
 use bevy::color::palettes::tailwind;
 use bevy::input::mouse::*;
-use bevy::pbr::NotShadowCaster;
-use bevy::render::view::RenderLayers;
-use bevy::{color::palettes::css, prelude::*};
+use bevy::prelude::*;
+use bevy_tnua::builtins::TnuaBuiltinDash;
+use bevy_tnua::math::{float_consts, AdjustPrecision, AsF32, Float, Quaternion, Vector3};
 use bevy_tnua::prelude::*;
 use bevy_tnua_avian3d::*;
 
 #[derive(Debug, Component)]
-pub struct WorldModelCamera;
+pub struct Player;
+
+#[derive(Debug, Component)]
+pub struct PlayerHead {
+    pub forward: Vector3,
+    pub pitch_angle: Float,
+}
+
+impl Default for PlayerHead {
+    fn default() -> Self {
+        Self {
+            forward: Vector3::NEG_Z,
+            pitch_angle: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Component)]
+pub struct PlayerEyes;
 
 /// Player movement speed factor.
 const PLAYER_SPEED: f32 = 10.;
-
-/// Used implicitly by all entities without a `RenderLayers` component.
-/// Our world model camera and all objects other than the player are on this layer.
-/// The light source belongs to both layers.
-pub const DEFAULT_RENDER_LAYER: usize = 0;
-
-/// Used by the view model camera and the player's arm.
-/// The light source belongs to both layers.
-pub const VIEW_MODEL_RENDER_LAYER: usize = 1;
 
 pub struct PlayerPlugin;
 
@@ -35,115 +44,99 @@ impl Plugin for PlayerPlugin {
         .add_systems(Startup, (player_setup,))
         .add_systems(
             Update,
-            (player_look, player_move, player_fov, player_grow_shrink),
+            (player_look, player_move, player_fov, head_height_adjust),
         );
     }
 }
-
-#[derive(Debug, Component)]
-pub struct Player;
 
 fn player_setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let arm = meshes.add(Cuboid::new(0.1, 0.1, 0.5));
-    let arm_material = materials.add(Color::from(tailwind::TEAL_200));
-
     let body = meshes.add(Capsule3d::new(10.0, 40.0));
     let body_material = materials.add(Color::from(tailwind::FUCHSIA_900));
+
+    let arm = meshes.add(Capsule3d::new(2.5, 30.0));
+    let arm_material = materials.add(Color::from(tailwind::GREEN_800));
+
+    let head = meshes.add(Sphere::new(8.0));
+    let glasses = meshes.add(Cuboid::new(14.0, 5.0, 14.0));
+    let glasses_material = materials.add(Color::from(tailwind::BLUE_900));
 
     commands
         .spawn((
             Player,
-            PbrBundle {
-                mesh: meshes.add(Capsule3d {
-                    radius: 0.5,
-                    half_length: 0.5,
-                }),
-                material: materials.add(Color::from(css::DARK_CYAN)),
+            MaterialMeshBundle {
+                mesh: body,
+                material: body_material.clone(),
                 transform: Transform::from_xyz(0.0, 1000.0, 0.0),
-                ..Default::default()
+                ..default()
             },
             // The player character needs to be configured as a dynamic rigid body of the physics
             // engine.
             RigidBody::Dynamic,
-            Collider::capsule(0.5, 1.0),
+            Collider::capsule(10.0, 40.0),
             // This bundle holds the main components.
             TnuaControllerBundle::default(),
             // A sensor shape is not strictly necessary, but without it we'll get weird results.
-            TnuaAvian3dSensorShape(Collider::cylinder(0.49, 0.0)),
+            TnuaAvian3dSensorShape(Collider::capsule(10.0, 40.0)),
             // Tnua can fix the rotation, but the character will still get rotated before it can do so.
             // By locking the rotation we can prevent this.
             LockedAxes::ROTATION_LOCKED,
-            RenderLayers::layer(VIEW_MODEL_RENDER_LAYER),
         ))
         .with_children(|parent| {
-            parent.spawn((
-                WorldModelCamera,
-                Camera3dBundle {
-                    projection: PerspectiveProjection {
-                        fov: 90.0_f32.to_radians(),
-                        ..default()
-                    }
-                    .into(),
-                    ..default()
-                },
-            ));
-
-            // Spawn view model camera.
-            parent.spawn((
-                Camera3dBundle {
-                    camera: Camera {
-                        // Bump the order to render on top of the world model.
-                        order: 1,
+            parent
+                .spawn((
+                    PlayerHead::default(),
+                    MaterialMeshBundle {
+                        mesh: head,
+                        material: body_material,
+                        transform: Transform::from_xyz(0.0, 50.0, 0.0),
                         ..default()
                     },
-                    projection: PerspectiveProjection {
-                        fov: 70.0_f32.to_radians(),
+                ))
+                .with_children(|sub_parent| {
+                    sub_parent.spawn((MaterialMeshBundle {
+                        mesh: glasses,
+                        material: glasses_material,
+                        transform: Transform::from_xyz(0.0, 3.0, -4.0),
                         ..default()
-                    }
-                    .into(),
-                    ..default()
-                },
-                // Only render objects belonging to the view model.
-                RenderLayers::layer(VIEW_MODEL_RENDER_LAYER),
-            ));
+                    },));
+                    sub_parent.spawn((
+                        PlayerEyes,
+                        Camera3dBundle {
+                            projection: PerspectiveProjection {
+                                fov: 90.0_f32.to_radians(),
+                                ..default()
+                            }
+                            .into(),
+                            transform: Transform::from_xyz(0.0, 3.0, -4.0),
+                            ..default()
+                        },
+                    ));
+                });
 
-            // Spawn the player's right arm.
-            parent.spawn((
-                MaterialMeshBundle {
-                    mesh: arm,
-                    material: arm_material,
-                    transform: Transform::from_xyz(0.2, -0.1, -0.25),
-                    ..default()
-                },
-                // Ensure the arm is only rendered by the view model camera.
-                RenderLayers::layer(VIEW_MODEL_RENDER_LAYER),
-                // The arm is free-floating, so shadows would look weird.
-                NotShadowCaster,
-            ));
-
-            // Spawn the player's body.
-            parent.spawn((
-                MaterialMeshBundle {
-                    mesh: body,
-                    material: body_material,
-                    transform: Transform::from_xyz(0.0, 2.0, 0.0),
-                    ..default()
-                },
-                RenderLayers::layer(DEFAULT_RENDER_LAYER),
-                NotShadowCaster,
-            ));
+            parent.spawn((MaterialMeshBundle {
+                mesh: arm,
+                material: arm_material,
+                transform: Transform::from_xyz(0.0, 15.0, 0.0)
+                    .with_rotation(Quat::from_rotation_z(90.0_f32.to_radians())),
+                ..default()
+            },));
         });
 }
 
 fn player_move(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut controller: Query<(&mut TnuaController, &Transform), With<Player>>,
+    mut query_player: Query<(&mut TnuaController, &Transform), With<Player>>,
+    query_head: Query<&PlayerHead>,
 ) {
-    let Ok((mut controller, transform)) = controller.get_single_mut() else {
+    let Ok((mut controller, player_transform)) = query_player.get_single_mut() else {
+        return;
+    };
+
+    let Ok(player_head) = query_head.get_single() else {
         return;
     };
 
@@ -162,19 +155,14 @@ fn player_move(
         direction += Vec3::X;
     }
 
-    // NOTE: Restricting the player movement to XZ plane might be incorrect
-    // after there are slopes the player must navigate up and down.
+    direction = direction.clamp_length_max(1.0);
 
-    // Get the player's forward direction vector (in the XZ plane)
-    let forward = transform.rotation * Vec3::Z;
-    let right = transform.rotation * Vec3::X;
+    direction = Transform::default()
+        .looking_to(player_head.forward.f32(), Vec3::Y)
+        .transform_point(direction.f32())
+        .adjust_precision();
 
-    // Ignore the Y component (only consider X and Z)
-    let forward_xz = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
-    let right_xz = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
-
-    // Calculate the movement in the XZ plane
-    let direction = forward_xz * direction.z + right_xz * direction.x;
+    let dash = keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
 
     // Feed the basis every frame. Even if the player doesn't move - just use `desired_velocity:
     // Vec3::ZERO`. `TnuaController` starts without a basis, which will make the character collider
@@ -182,6 +170,7 @@ fn player_move(
     controller.basis(TnuaBuiltinWalk {
         // The `desired_velocity` determines how the character will move.
         desired_velocity: direction.normalize_or_zero() * 10.0,
+        desired_forward: player_head.forward,
         // The `float_height` must be greater (even if by little) from the distance between the
         // character's center and the lowest point of its collider.
         float_height: 1.5,
@@ -192,7 +181,7 @@ fn player_move(
 
     // Feed the jump action every frame as long as the player holds the jump button. If the player
     // stops holding the jump button, simply stop feeding the action.
-    if keyboard.any_pressed([KeyCode::Backspace, KeyCode::Backspace]) {
+    if keyboard.any_pressed([KeyCode::Space, KeyCode::Backspace]) {
         controller.action(TnuaBuiltinJump {
             // The height is the only mandatory field of the jump button.
             height: 4.0,
@@ -200,28 +189,63 @@ fn player_move(
             ..Default::default()
         });
     }
+
+    if dash {
+        controller.action(TnuaBuiltinDash {
+            // Dashing is also an action, but because it has directions we need to provide said
+            // directions. `displacement` is a vector that determines where the jump will bring
+            // us. Note that even after reaching the displacement, the character may still have
+            // some leftover velocity (configurable with the other parameters of the action)
+            //
+            // The displacement is "frozen" when the action starts - user code does not have to
+            // worry about storing the original direction.
+            displacement: direction.normalize() * 10.0,
+            // When set, the `desired_forward` of the dash action "overrides" the
+            // `desired_forward` of the walk basis. Like the displacement, it gets "frozen" -
+            // allowing to easily maintain a forward direction during the dash.
+            desired_forward: direction.normalize(),
+            allow_in_air: true,
+            ..Default::default()
+        });
+    }
 }
 
 fn player_look(
-    mut player: Query<&mut Transform, With<Player>>,
+    mut query: Query<(&mut Transform, &mut PlayerHead)>,
     mut mouse_motion: EventReader<MouseMotion>,
 ) {
-    let Ok(mut player) = player.get_single_mut() else {
+    let Ok((mut transform, mut player_head)) = query.get_single_mut() else {
         return;
     };
 
-    for motion in mouse_motion.read() {
-        let yaw = -motion.delta.x * 0.003;
-        let pitch = -motion.delta.y * 0.002;
-        // Order of rotations is important, see <https://gamedev.stackexchange.com/a/136175/103059>
-        player.rotate_y(yaw);
-        player.rotate_local_x(pitch);
-    }
+    let total_delta: Vec2 = mouse_motion.read().map(|event| event.delta).sum();
+
+    let yaw = Quaternion::from_rotation_y(-0.007 * total_delta.x.adjust_precision());
+    player_head.forward = yaw.mul_vec3(player_head.forward);
+
+    let pitch = 0.005 * total_delta.y.adjust_precision();
+    player_head.pitch_angle =
+        (player_head.pitch_angle + pitch).clamp(-float_consts::FRAC_PI_2, float_consts::FRAC_PI_2);
+
+    // Normalize the forward vector
+    let forward_normalized = player_head.forward.normalize();
+
+    // Define the default forward direction (the direction the object is currently facing)
+    let default_forward = Vec3::NEG_Z; // assuming -Z is the default forward direction
+
+    // Create a quaternion to rotate the default forward vector to the target forward vector
+    let forward_rotation = Quat::from_rotation_arc(default_forward, forward_normalized);
+
+    // Create a quaternion for rotation around the local X-axis by the specified angle
+    let x_rotation = Quat::from_rotation_x(player_head.pitch_angle);
+
+    // Combine the two rotations by multiplying the quaternions
+    transform.rotation = forward_rotation * x_rotation;
 }
 
 fn player_fov(
     mut mouse_wheel: EventReader<MouseWheel>,
-    mut world_model_projection: Query<&mut Projection, With<WorldModelCamera>>,
+    mut world_model_projection: Query<&mut Projection, With<PlayerEyes>>,
 ) {
     let mut projection = world_model_projection.single_mut();
     let Projection::Perspective(ref mut perspective) = projection.as_mut() else {
@@ -241,8 +265,8 @@ fn player_fov(
     }
 }
 
-fn player_grow_shrink(
-    mut transform: Query<&mut Transform, With<WorldModelCamera>>,
+fn head_height_adjust(
+    mut transform: Query<&mut Transform, With<PlayerHead>>,
     time: Res<Time>,
     kb_input: Res<ButtonInput<KeyCode>>,
 ) {
@@ -251,11 +275,9 @@ fn player_grow_shrink(
     };
 
     let mut direction = Vec3::ZERO;
-
     if kb_input.pressed(KeyCode::Minus) {
         direction.y -= 1.;
     }
-
     if kb_input.pressed(KeyCode::Equal) {
         direction.y += 1.;
     }
@@ -263,15 +285,5 @@ fn player_grow_shrink(
     // Progressively update the player's position over time. Normalize the
     // direction vector to prevent it from exceeding a magnitude of 1 when
     // moving diagonally.
-    let move_delta = direction.normalize_or_zero() * PLAYER_SPEED * time.delta_seconds();
-
-    // Apply the movement to the player's translation
-    transform.translation += move_delta;
-}
-
-pub fn add_player_actions(app: &mut App) -> &mut App {
-    app.add_systems(
-        Update,
-        (player_look, player_fov, player_move, player_grow_shrink),
-    )
+    transform.translation += direction.normalize_or_zero() * PLAYER_SPEED * time.delta_seconds();
 }
