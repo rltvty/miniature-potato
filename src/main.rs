@@ -2,6 +2,7 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::window::WindowRef;
 use bevy::window::WindowResolution;
+use bevy::color::palettes::tailwind;
 
 pub mod glft_info;
 pub mod player;
@@ -28,7 +29,9 @@ fn main() {
         // Overwrite default debug rendering configuration (optional)
         .insert_gizmo_config(
             PhysicsGizmos {
-                aabb_color: Some(Color::WHITE),
+                //aabb_color: Some(Color::WHITE),
+                //collider_color: Some(Color::srgb_from_array(tailwind::AMBER_900.to_f32_array_no_alpha()) ),
+                contact_point_color: Some(Color::srgb_from_array(tailwind::CYAN_500.to_f32_array_no_alpha())),
                 ..default()
             },
             GizmoConfig::default(),
@@ -39,7 +42,7 @@ fn main() {
         )
         .add_systems(
             Update,
-            (quit_on_esc_system, rotate_blades, drop_wind_turbine),
+            (quit_on_esc_system, rotate_blades, drop_wind_turbine, update_gizmo_config),
         )
         .run();
 }
@@ -129,4 +132,57 @@ fn spawn_text(mut commands: Commands) {
                 },
             ));
         });
+}
+
+fn update_gizmo_config(
+    mut config_store: ResMut<GizmoConfigStore>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+) {
+    if keyboard.just_pressed(KeyCode::KeyY) {
+        for (_, config, _) in config_store.iter_mut() {
+            config.depth_bias = if config.depth_bias == 0. { -1. } else { 0. };
+        }
+    }
+    if keyboard.just_pressed(KeyCode::KeyU) {
+        for (_, config, _) in config_store.iter_mut() {
+            // Toggle line_perspective
+            config.line_perspective ^= true;
+            // Increase the line width when line_perspective is on
+            config.line_width *= if config.line_perspective { 5. } else { 1. / 5. };
+        }
+    }
+
+    let (config, _) = config_store.config_mut::<DefaultGizmoConfigGroup>();
+    if keyboard.pressed(KeyCode::BracketRight) {
+        config.line_width += 5. * time.delta_seconds();
+        config.line_width = config.line_width.clamp(0., 50.);
+    }
+    if keyboard.pressed(KeyCode::BracketLeft) {
+        config.line_width -= 5. * time.delta_seconds();
+        config.line_width = config.line_width.clamp(0., 50.);
+    }
+    if keyboard.just_pressed(KeyCode::Backslash) {
+        config.enabled ^= true;
+    }
+    if keyboard.just_pressed(KeyCode::KeyP) {
+        config.line_style = match config.line_style {
+            GizmoLineStyle::Solid => GizmoLineStyle::Dotted,
+            _ => GizmoLineStyle::Solid,
+        };
+    }
+    if keyboard.just_pressed(KeyCode::KeyO) {
+        config.line_joints = match config.line_joints {
+            GizmoLineJoint::Bevel => GizmoLineJoint::Miter,
+            GizmoLineJoint::Miter => GizmoLineJoint::Round(4),
+            GizmoLineJoint::Round(_) => GizmoLineJoint::None,
+            GizmoLineJoint::None => GizmoLineJoint::Bevel,
+        };
+    }
+
+    if keyboard.just_pressed(KeyCode::KeyI) {
+        // AABB gizmos are normally only drawn on entities with a ShowAabbGizmo component
+        // We can change this behaviour in the configuration of AabbGizmoGroup
+        config_store.config_mut::<AabbGizmoConfigGroup>().1.draw_all ^= true;
+    }
 }

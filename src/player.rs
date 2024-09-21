@@ -1,4 +1,5 @@
 use avian3d::prelude::*;
+use bevy::color::palettes::css::*;
 use bevy::color::palettes::tailwind;
 use bevy::input::mouse::*;
 use bevy::prelude::*;
@@ -44,7 +45,7 @@ impl Plugin for PlayerPlugin {
         .add_systems(Startup, (player_setup,))
         .add_systems(
             Update,
-            (player_look, player_move, player_fov, head_height_adjust),
+            (player_look, player_move, player_fov, head_height_adjust, update_gravity_system),
         );
     }
 }
@@ -61,18 +62,14 @@ fn player_setup(
     let arm_material = materials.add(Color::from(tailwind::GREEN_800));
 
     let head = meshes.add(Sphere::new(8.0));
+    let head_material = materials.add(Color::from(tailwind::FUCHSIA_900));
+
     let glasses = meshes.add(Cuboid::new(14.0, 5.0, 14.0));
     let glasses_material = materials.add(Color::from(tailwind::BLUE_900));
 
     commands
         .spawn((
             Player,
-            MaterialMeshBundle {
-                mesh: body,
-                material: body_material.clone(),
-                transform: Transform::from_xyz(0.0, 1000.0, 0.0),
-                ..default()
-            },
             // The player character needs to be configured as a dynamic rigid body of the physics
             // engine.
             RigidBody::Dynamic,
@@ -81,9 +78,10 @@ fn player_setup(
             TnuaControllerBundle::default(),
             // A sensor shape is not strictly necessary, but without it we'll get weird results.
             TnuaAvian3dSensorShape(Collider::capsule(10.0, 40.0)),
-            // Tnua can fix the rotation, but the character will still get rotated before it can do so.
-            // By locking the rotation we can prevent this.
-            LockedAxes::ROTATION_LOCKED,
+            // TODO: remove this to allow the body to face forward,
+            // but then need to fix head over-rotation
+            // LockedAxes::ROTATION_LOCKED,
+            SpatialBundle::from_transform(Transform::from_xyz(500.0, 1000.0, 500.0)),
         ))
         .with_children(|parent| {
             parent
@@ -91,7 +89,7 @@ fn player_setup(
                     PlayerHead::default(),
                     MaterialMeshBundle {
                         mesh: head,
-                        material: body_material,
+                        material: head_material,
                         transform: Transform::from_xyz(0.0, 50.0, 0.0),
                         ..default()
                     },
@@ -117,22 +115,34 @@ fn player_setup(
                     ));
                 });
 
-            parent.spawn((MaterialMeshBundle {
-                mesh: arm,
-                material: arm_material,
-                transform: Transform::from_xyz(0.0, 15.0, 0.0)
-                    .with_rotation(Quat::from_rotation_z(90.0_f32.to_radians())),
-                ..default()
-            },));
+            parent.spawn((
+                MaterialMeshBundle {
+                    mesh: body,
+                    material: body_material,
+                    ..default()
+                },
+            ));
+
+            parent.spawn((
+                MaterialMeshBundle {
+                    mesh: arm,
+                    material: arm_material,
+                    transform: Transform::from_xyz(0.0, 15.0, 0.0)
+                        .with_rotation(Quat::from_rotation_z(90.0_f32.to_radians())),
+                    ..default()
+                },
+            ));
         });
 }
 
 fn player_move(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut query_player: Query<(&mut TnuaController, &Transform), With<Player>>,
+    mut query_player: Query<&mut TnuaController, With<Player>>,
     query_head: Query<&PlayerHead>,
+    query_player_transform: Query<&Transform, With<Player>>,
+    mut gizmos: Gizmos,
 ) {
-    let Ok((mut controller, player_transform)) = query_player.get_single_mut() else {
+    let Ok(mut controller) = query_player.get_single_mut() else {
         return;
     };
 
@@ -140,27 +150,56 @@ fn player_move(
         return;
     };
 
+    let Ok(player_transform) = query_player_transform.get_single() else {
+        return;
+    };
+
+    // Initialize direction
     let mut direction = Vec3::ZERO;
 
+    // Define player's local forward (Z-axis) and right (X-axis)
+    let forward = player_transform.rotation * Vec3::Z;
+    let right = player_transform.rotation * Vec3::X;
+
+    // Adjust direction based on input relative to player's local space
     if keyboard.any_pressed([KeyCode::ArrowUp, KeyCode::KeyW]) {
-        direction -= Vec3::Z;
+        direction -= forward;
     }
     if keyboard.any_pressed([KeyCode::ArrowDown, KeyCode::KeyS]) {
-        direction += Vec3::Z;
+        direction += forward;
     }
     if keyboard.any_pressed([KeyCode::ArrowLeft, KeyCode::KeyA]) {
-        direction -= Vec3::X;
+        direction -= right;
     }
     if keyboard.any_pressed([KeyCode::ArrowRight, KeyCode::KeyD]) {
-        direction += Vec3::X;
+        direction += right;
     }
-
     direction = direction.clamp_length_max(1.0);
 
-    direction = Transform::default()
-        .looking_to(player_head.forward.f32(), Vec3::Y)
-        .transform_point(direction.f32())
-        .adjust_precision();
+    gizmos.arrow(Vec3::ZERO, Vec3::ONE * 1000.0, YELLOW);
+
+    // Calculate the world-space position of the direction
+    let world_start = player_transform.translation; // Player's position in world space
+    let world_end = player_transform.translation + direction * 50.0; // Scale direction and apply it to the world start position
+
+    // Draw the gizmo arrow
+    gizmos.arrow(world_start, world_end, GREEN);
+
+    // Draw gizmo 1: From the player's center straight down along the player's local Y-axis
+    let player_position = player_transform.translation;
+    let down_direction = player_transform.rotation * Vec3::NEG_Y * 100.0; // 100 units down
+    let down_end = player_position + down_direction;
+    gizmos.arrow(player_position, down_end, RED);
+
+    let player_position = player_transform.translation;
+    let down_direction = player_transform.rotation * Vec3::NEG_Y * 100.0; // 100 units down
+    let down_end = player_position + down_direction;
+    gizmos.arrow(player_position, down_end, RED);
+
+    // Draw gizmo 2: From the player's center to the world origin (Vec3::ZERO)
+    let world_origin = Vec3::ZERO;
+    gizmos.line(player_position, world_origin, BLUE);
+
 
     let dash = keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
 
@@ -170,10 +209,11 @@ fn player_move(
     controller.basis(TnuaBuiltinWalk {
         // The `desired_velocity` determines how the character will move.
         desired_velocity: direction.normalize_or_zero() * 10.0,
-        desired_forward: player_head.forward,
+        //desired_forward: player_head.forward,
         // The `float_height` must be greater (even if by little) from the distance between the
         // character's center and the lowest point of its collider.
-        float_height: 1.5,
+        float_height: 30.0,
+        max_slope: float_consts::PI * 2.0,
         // `TnuaBuiltinWalk` has many other fields for customizing the movement - but they have
         // sensible defaults. Refer to the `TnuaBuiltinWalk`'s documentation to learn what they do.
         ..Default::default()
@@ -203,11 +243,38 @@ fn player_move(
             // When set, the `desired_forward` of the dash action "overrides" the
             // `desired_forward` of the walk basis. Like the displacement, it gets "frozen" -
             // allowing to easily maintain a forward direction during the dash.
-            desired_forward: direction.normalize(),
+            // desired_forward: direction.normalize(),
             allow_in_air: true,
             ..Default::default()
-        });
+        });        
     }
+}
+
+fn update_gravity_system(mut gravity: ResMut<Gravity>, query: Query<&Transform, With<Player>>) {
+    let Ok(player_transform) = query.get_single() else {
+        return;
+    };
+
+    // Calculate the direction from the player's position to the center of the planet (Vec3::ZERO)
+    let direction_to_center = Vec3::ZERO - player_transform.translation;
+
+    // Normalize the direction vector so it's unit length
+    let gravity_direction = direction_to_center.normalize();
+
+    // Set gravity to point towards the center with a magnitude of -9.8 (standard Earth gravity)
+    gravity.0 = gravity_direction * 9.8;
+
+    // // Adjust player's rotation to make them upright relative to gravity
+    // // Create a rotation from the player's current "up" direction (Y axis) to the gravity direction (inverted)
+    // let current_up = player_transform.rotation * Vec3::Y;
+    // let rotation_to_upright = Quat::from_rotation_arc(current_up, -gravity_direction);
+    // println!("current_up: {:?}", current_up);
+    // println!("rotation_to_upright: {:?}", rotation_to_upright);
+    //
+    // // Apply the rotation to the player's transform
+    // player_transform.rotation = rotation_to_upright * player_transform.rotation;
+
+    // println!("Gravity: {:?}", gravity);
 }
 
 fn player_look(
@@ -280,6 +347,18 @@ fn head_height_adjust(
     }
     if kb_input.pressed(KeyCode::Equal) {
         direction.y += 1.;
+    }
+    if kb_input.pressed(KeyCode::Digit9) {
+        direction.x -= 1.;
+    }
+    if kb_input.pressed(KeyCode::Digit0) {
+        direction.x += 1.;
+    }
+    if kb_input.pressed(KeyCode::Digit7) {
+        direction.z -= 1.;
+    }
+    if kb_input.pressed(KeyCode::Digit8) {
+        direction.z += 1.;
     }
 
     // Progressively update the player's position over time. Normalize the

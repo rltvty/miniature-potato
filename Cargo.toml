@@ -10,8 +10,11 @@ avian3d = "0.1.2"
 # the compile times are rather long. This section explains how to speed up iterative  
 # compiles: the amount of time it takes to rebuild your project after changing a single file.
 bevy = { version = "0.14.2", features = ["dynamic_linking"] }
-bevy-tnua = "0.19.0"
-bevy-tnua-avian3d = "0.1.1"
+bevy-tnua = { path = "/Users/epinzur/src/github.com/rltvty/bevy-tnua/" }
+
+# bevy-tnua = "0.19.0"
+# bevy-tnua-avian3d = "0.1.1"
+bevy-tnua-avian3d = { path = "/Users/epinzur/src/github.com/rltvty/bevy-tnua/avian3d" }
 bevy_dylib = { version = "0.14.2" }
 
 # Improve Runtime Performance (Optional)
