@@ -34,7 +34,7 @@ fn generate_potato_mesh(
     noise_factor: f32,
     elongation_factor: f32,
 ) -> Mesh {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
@@ -57,7 +57,7 @@ fn generate_potato_mesh(
             let z = sin_phi * sin_theta;
 
             // Apply the latitude-scaled noise
-            let radius = 1.0 + rng.gen_range(-noise_factor..noise_factor) * latitude_noise_scale;
+            let radius = 1.0 + rng.random_range(-noise_factor..noise_factor) * latitude_noise_scale;
 
             vertices.push([x * radius, y * radius, z * radius]);
         }
