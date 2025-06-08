@@ -1,9 +1,30 @@
-use bevy::prelude::*;
-mod potato_mesh;
+use bevy::{
+    prelude::*,
+    pbr::wireframe::{WireframePlugin, WireframeConfig},
+    render::{
+        render_resource::WgpuFeatures,
+        settings::{RenderCreation, WgpuSettings},
+        RenderPlugin,
+    },
+};
+mod geodesic_potato;
+mod hexapent_potato;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(RenderPlugin {
+            render_creation: RenderCreation::Automatic(WgpuSettings {
+                // WARN this is a native only feature. It will not work with webgl or webgpu
+                features: WgpuFeatures::POLYGON_MODE_LINE,
+                ..default()
+            }),
+            ..default()
+        }))
+        .add_plugins(WireframePlugin::default())
+        .insert_resource(WireframeConfig {
+            global: false,
+            default_color: Color::BLACK.into(),
+        })
         .add_systems(Startup, setup)
         .add_systems(Update, rotate_potato)
         .run();
@@ -17,22 +38,31 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Create a potato-shaped mesh using our imported function
-    // You can change which potato variant to use here:
-    // let potato_mesh = potato_mesh::create_potato_mesh();  // Default potato
-    // let potato_mesh = potato_mesh::create_red_potato_mesh(); // Smoother, rounder potato
-    let potato_mesh = potato_mesh::create_red_potato_mesh(); // Using the red potato variant
+    // Create two parts: solid potato and hexagon/pentagon wireframe
     
-    // Add the potato to the scene
+    // First, the solid potato
     commands.spawn((
-        Mesh3d(meshes.add(potato_mesh)),
+        Mesh3d(meshes.add(geodesic_potato::create_geodesic_potato_mesh())),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.8, 0.7, 0.5), // Potato-like color
             perceptual_roughness: 0.9,
             ..default()
         })),
-        Transform::from_xyz(0.0, 0.0, 0.0),
+        Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(0.96)), // Slightly smaller
         Potato,
+    ));
+
+    // Then, a line mesh showing only the hexagon/pentagon edges
+    commands.spawn((
+        Mesh3d(meshes.add(hexapent_potato::create_potato_wireframe_mesh())),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.0, 0.0, 0.0), // Black for wireframe
+            emissive: Color::srgb(0.0, 0.0, 0.0).into(),
+            unlit: true, // Unaffected by lighting
+            ..default()
+        })),
+        Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(1.02)), // Slightly larger
+        Potato, // Mark as potato for rotation
     ));
 
     // Add a directional light
