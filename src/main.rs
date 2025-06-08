@@ -2,13 +2,22 @@
 
 use bevy::prelude::*;
 use miniature_potato::camera::{camera_controller, calculate_camera_transform, OrbitCamera};
+use miniature_potato::ray_casting::{
+    ray_casting_system, debug_hovered_triangle, visualize_hit_point, HoveredTriangle
+};
 use miniature_potato::world::setup_world;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .init_resource::<HoveredTriangle>()
         .add_systems(Startup, (setup_world, setup_camera))
-        .add_systems(Update, camera_controller)
+        .add_systems(Update, (
+            camera_controller,
+            ray_casting_system,
+            debug_hovered_triangle,
+            visualize_hit_point,
+        ))
         .run();
 }
 

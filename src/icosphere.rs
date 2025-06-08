@@ -62,6 +62,46 @@ impl Icosphere {
         mesh
     }
 
+    pub fn generate_with_data(&self) -> (Mesh, Vec<Vec3>, Vec<u32>) {
+        let mut vertices = self.generate_icosahedron_vertices();
+        let mut indices = self.generate_icosahedron_indices();
+
+        for _ in 0..self.subdivisions {
+            let (new_vertices, new_indices) = self.subdivide(&vertices, &indices);
+            vertices = new_vertices;
+            indices = new_indices;
+        }
+
+        for vertex in vertices.iter_mut() {
+            *vertex = vertex.normalize() * self.radius;
+        }
+
+        // Create mesh using same logic as generate()
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            bevy::render::render_asset::RenderAssetUsages::default(),
+        );
+
+        let positions: Vec<[f32; 3]> = vertices.iter().map(|v| [v.x, v.y, v.z]).collect();
+        let normals: Vec<[f32; 3]> = vertices.iter().map(|v| {
+            let n = v.normalize();
+            [n.x, n.y, n.z]
+        }).collect();
+        let uvs: Vec<[f32; 2]> = vertices.iter().map(|v| {
+            let n = v.normalize();
+            let u = 0.5 + (n.z.atan2(n.x) / (2.0 * std::f32::consts::PI));
+            let v = 0.5 - (n.y.asin() / std::f32::consts::PI);
+            [u, v]
+        }).collect();
+
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+        mesh.insert_indices(Indices::U32(indices.clone()));
+
+        (mesh, vertices, indices)
+    }
+
     /// Generate the base icosahedron vertices
     fn generate_icosahedron_vertices(&self) -> Vec<Vec3> {
         let phi = (1.0 + 5.0_f32.sqrt()) / 2.0; // Golden ratio
