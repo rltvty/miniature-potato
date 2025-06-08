@@ -14,6 +14,7 @@ fn main() {
         .init_resource::<HoveredTriangle>()
         .add_systems(Startup, (setup_world, setup_camera))
         .add_systems(Update, (
+            handle_escape_key,
             camera_controller,
             ray_casting_system,
             debug_hovered_triangle,
@@ -22,6 +23,17 @@ fn main() {
             visualize_tiles,
         ))
         .run();
+}
+
+/// System to handle escape key press for quitting the app
+fn handle_escape_key(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut exit: EventWriter<AppExit>,
+) {
+    if keyboard_input.just_pressed(KeyCode::Escape) {
+        println!("Escape key pressed - exiting application");
+        exit.write(AppExit::Success);
+    }
 }
 
 /// Setup the camera with orbit controls

@@ -11,8 +11,12 @@ pub fn setup_world(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Create icosphere with 2 subdivisions for smoother surface
-    let icosphere = Icosphere::new(2.0, 2);
+    // Configuration for our world
+    const RADIUS: f32 = 2.0;
+    const SUBDIVISIONS: usize = 2;
+    
+    // Create icosphere with specified parameters
+    let icosphere = Icosphere::new(RADIUS, SUBDIVISIONS);
     
     // Try to use generate_with_data if available, otherwise fallback
     let (mesh, vertices, indices) = if std::panic::catch_unwind(|| {
@@ -29,7 +33,7 @@ pub fn setup_world(
 
     // Generate tile system from triangle data
     let tile_map = if !vertices.is_empty() {
-        generate_tiles_from_icosphere(&vertices, &indices, 2)
+        generate_tiles_from_icosphere(&vertices, &indices, SUBDIVISIONS, RADIUS)
     } else {
         TileMap::default()
     };
