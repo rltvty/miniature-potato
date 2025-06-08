@@ -4,66 +4,57 @@
 Building a game using Bevy 0.16.1 with a spherical 3D world tiled with hexagons and pentagons.
 
 ## Phase 1: Basic 3D Scene ✅ COMPLETED
-
-### Key Bevy 0.16.x Changes Implemented
-- **Mesh Components**: Using `Mesh3d()` component instead of old mesh handle approach
-- **Materials**: Using `MeshMaterial3d()` component for materials  
-- **Camera**: Using `Camera3d::default()` instead of `Camera3dBundle`
-- **Lighting**: Direct component spawning for lights
-- **AmbientLight**: Requires `affects_lightmapped_meshes` field in 0.16.x
-
-### Current Implementation
-- **App Setup**: `App::new().add_plugins(DefaultPlugins)`
-- **Sphere**: 2.0 radius sphere with blue StandardMaterial
-- **Lighting**: DirectionalLight with shadows + AmbientLight for visibility
-- **Camera**: Positioned at (0, 2, 6) looking at origin
-- **Dependencies**: Bevy 0.16.1 with dynamic linking enabled
+- Basic sphere, camera, lighting working with Bevy 0.16.1 syntax
 
 ## Phase 2: Camera Controls ✅ COMPLETED
+- Mouse orbit controls (left-click + drag)
+- Mouse wheel zoom with limits
+- Smooth spherical coordinate movement
 
-### Features Added
-- **Orbit Camera Component**: Custom component to track camera state
-  - Distance from target (zoom level)
-  - Yaw and pitch angles for rotation
-  - Configurable sensitivity and zoom limits
-- **Mouse Controls**: 
-  - Left-click and drag to orbit around the sphere
-  - Mouse wheel to zoom in/out
-  - Pitch clamping to prevent camera flipping
-- **Smooth Movement**: Real-time camera updates using spherical coordinates
+## Phase 3: Modular Structure + Icosphere ✅ COMPLETED
+
+### File Structure Reorganization
+- **src/lib.rs**: Module declarations
+- **src/camera.rs**: OrbitCamera component and controller system
+- **src/icosphere.rs**: Icosphere generation algorithm
+- **src/world.rs**: World setup (lighting, icosphere spawning)
+- **src/main.rs**: App setup and system registration (now much smaller!)
+
+### Icosphere Generation Features
+- **Base Icosahedron**: 12 vertices, 20 triangular faces (perfect foundation)
+- **Subdivision**: Recursively splits triangles for detail levels
+- **Sphere Projection**: Projects all vertices to perfect sphere surface
+- **Proper Mesh**: Generates positions, normals, UVs, and triangle indices
+- **Configurable**: Adjustable radius and subdivision levels
 
 ### Technical Implementation
-- `OrbitCamera` component with distance, yaw, pitch, target, and sensitivity settings
-- `camera_controller` system that reads mouse input events
-- Spherical coordinate calculation for smooth orbital movement
-- Zoom limits (2.5 to 20.0 units) to prevent going inside/too far from sphere
-- Mouse sensitivity of 0.005 for precise control
+- Golden ratio (φ) based icosahedron vertices for perfect geometry
+- Midpoint caching during subdivision to avoid duplicate vertices
+- Spherical UV mapping for texture coordinates
+- Face normals calculated as normalized positions (perfect for spheres)
 
-### Code Structure
-```rust
-fn main() -> App with DefaultPlugins + startup/update systems
-fn setup() -> spawns sphere, lights, camera with OrbitCamera component
-fn camera_controller() -> handles mouse input and updates camera transform
-fn calculate_camera_transform() -> converts orbit parameters to Transform
-```
+### Current Setup
+- **Radius**: 2.0 units
+- **Subdivisions**: 1 (gives us 80 triangular faces)
+- **Topology**: Even triangle distribution (much better than lat/lon grid)
+
+## Why Icosphere is Perfect for Hex/Pentagon Tiling
+1. **Mathematical Foundation**: The 12 original icosahedron vertices become pentagon positions
+2. **Even Distribution**: Much more uniform than latitude/longitude approaches
+3. **Scalable Detail**: More subdivisions = finer tile resolution
+4. **Natural Neighbors**: Triangle adjacency = tile adjacency
+5. **Ray Casting Ready**: Triangle faces perfect for mouse picking
 
 ## Next Phases (Planned)
-1. **Phase 3**: Basic interaction (ray casting for sphere surface picking)
-2. **Phase 4**: Icosphere generation (subdivided icosahedron)
-3. **Phase 5**: Hexagonal tessellation (convert triangles to hex/pentagon pattern)
-4. **Phase 6**: Tile interaction system (selection, highlighting)
-5. **Phase 7**: World data structure (hex coordinates, tile properties)
+1. **Phase 4**: Ray casting for mouse picking on icosphere faces
+2. **Phase 5**: Triangle face → hex/pentagon tile conversion
+3. **Phase 6**: Tile highlighting and selection system
+4. **Phase 7**: Tile placement (visual hexagon/pentagon overlays)
+5. **Phase 8**: Hex coordinate system and neighbor finding
 
-## Controls
+## Controls (Unchanged)
 - **Left Mouse + Drag**: Orbit camera around sphere
 - **Mouse Wheel**: Zoom in/out
-- **Automatic**: Pitch clamping prevents camera from flipping upside down
-
-## Technical Notes
-- Using `Sphere::new(2.0)` from Bevy primitives as foundation
-- Future: Will need custom mesh generation for proper hex/pentagon tessellation
-- Coordinate system: Need to map 2D hex coordinates to 3D sphere surface
-- Performance consideration: LOD system for large worlds
 
 ## Compilation Status
-✅ Code compiles successfully with Bevy 0.16.1 (no warnings)
+✅ All modules compile successfully with Bevy 0.16.1
