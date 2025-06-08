@@ -1,12 +1,10 @@
 //! A spherical world game with hexagonal tiling using Goldberg polyhedron
 
 use bevy::prelude::*;
-use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
+use bevy::pbr::wireframe::WireframePlugin;
 use miniature_potato::camera::{camera_controller, calculate_camera_transform, OrbitCamera};
-use miniature_potato::ray_casting::{
-    ray_casting_system, debug_hovered_triangle, visualize_hit_point, HoveredTriangle
-};
-use miniature_potato::tiles::{tile_selection_system, visualize_tiles};
+use miniature_potato::ray_casting::{HoveredTriangle, simple_tile_visualization};
+use miniature_potato::goldberg_tiles::{visualize_goldberg_tiles, minimal_gizmo_test};
 use miniature_potato::world::{setup_world, toggle_wireframe};
 
 fn main() {
@@ -21,11 +19,7 @@ fn main() {
             handle_escape_key,
             toggle_wireframe,
             camera_controller,
-            ray_casting_system,
-            debug_hovered_triangle,
-            visualize_hit_point,
-            tile_selection_system,
-            visualize_tiles,
+            simple_tile_visualization,
         ))
         .run();
 }

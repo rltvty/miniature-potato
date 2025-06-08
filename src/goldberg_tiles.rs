@@ -2,7 +2,31 @@
 
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
-use crate::tiles::{Tile, TileMap, TileType};
+
+/// Represents the type of tile
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TileType {
+    Hexagon,
+    Pentagon,
+}
+
+/// A tile on the spherical surface
+#[derive(Debug, Clone)]
+pub struct Tile {
+    pub tile_type: TileType,
+    pub center: Vec3,
+    pub neighbors: Vec<usize>, // Indices of neighboring tiles
+    pub triangle_indices: Vec<usize>, // Triangle faces that belong to this tile
+}
+
+/// Resource containing all tiles on the sphere
+#[derive(Resource, Default)]
+pub struct TileMap {
+    pub tiles: Vec<Tile>,
+    pub triangle_to_tile: HashMap<usize, usize>, // Maps triangle index to tile index
+    pub pentagon_indices: Vec<usize>, // Indices of pentagon tiles
+    pub hexagon_indices: Vec<usize>, // Indices of hexagon tiles
+}
 
 /// Generate tiles from a Goldberg polyhedron
 pub fn generate_tiles_from_goldberg(
@@ -14,17 +38,15 @@ pub fn generate_tiles_from_goldberg(
 ) -> TileMap {
     let mut tile_map = TileMap::default();
     
-    println!("Generating tiles from Goldberg polyhedron with parameters ({}, {})...", h, k);
-    
     // 1. Identify pentagon centers (12 original icosahedron vertices)
-    let pentagon_centers = identify_pentagon_centers();
+    let pentagon_centers = identify_pentagon_centers(radius);
     
     // 2. Identify hexagon centers based on (h,k) parameters
     let hexagon_centers = if h == 1 && k == 0 {
         // For soccer ball pattern, use exactly 10 hexagons
-        identify_soccer_ball_hexagons()
+        identify_soccer_ball_hexagons(radius)
     } else {
-        identify_hexagon_centers(h, k)
+        identify_hexagon_centers(h, k, radius)
     };
     
     println!("Found {} pentagon centers", pentagon_centers.len());
@@ -84,28 +106,28 @@ pub fn generate_tiles_from_goldberg(
     tile_map
 }
 
-/// Identify the 12 pentagon centers (original icosahedron vertices)
-fn identify_pentagon_centers() -> Vec<Vec3> {
+/// Identify the 12 pentagon centers (original icosahedron vertices) scaled to radius
+fn identify_pentagon_centers(radius: f32) -> Vec<Vec3> {
     let phi = (1.0 + 5.0_f32.sqrt()) / 2.0; // Golden ratio
     
     vec![
-        Vec3::new(0.0, 1.0, phi).normalize(),
-        Vec3::new(0.0, -1.0, phi).normalize(),
-        Vec3::new(0.0, 1.0, -phi).normalize(),
-        Vec3::new(0.0, -1.0, -phi).normalize(),
-        Vec3::new(1.0, phi, 0.0).normalize(),
-        Vec3::new(-1.0, phi, 0.0).normalize(),
-        Vec3::new(1.0, -phi, 0.0).normalize(),
-        Vec3::new(-1.0, -phi, 0.0).normalize(),
-        Vec3::new(phi, 0.0, 1.0).normalize(),
-        Vec3::new(-phi, 0.0, 1.0).normalize(),
-        Vec3::new(phi, 0.0, -1.0).normalize(),
-        Vec3::new(-phi, 0.0, -1.0).normalize(),
+        Vec3::new(0.0, 1.0, phi).normalize() * radius,
+        Vec3::new(0.0, -1.0, phi).normalize() * radius,
+        Vec3::new(0.0, 1.0, -phi).normalize() * radius,
+        Vec3::new(0.0, -1.0, -phi).normalize() * radius,
+        Vec3::new(1.0, phi, 0.0).normalize() * radius,
+        Vec3::new(-1.0, phi, 0.0).normalize() * radius,
+        Vec3::new(1.0, -phi, 0.0).normalize() * radius,
+        Vec3::new(-1.0, -phi, 0.0).normalize() * radius,
+        Vec3::new(phi, 0.0, 1.0).normalize() * radius,
+        Vec3::new(-phi, 0.0, 1.0).normalize() * radius,
+        Vec3::new(phi, 0.0, -1.0).normalize() * radius,
+        Vec3::new(-phi, 0.0, -1.0).normalize() * radius,
     ]
 }
 
 /// Special function to identify exactly 10 hexagon centers for the soccer ball pattern
-fn identify_soccer_ball_hexagons() -> Vec<Vec3> {
+fn identify_soccer_ball_hexagons(radius: f32) -> Vec<Vec3> {
     // For a proper soccer ball, we need exactly 10 hexagons
     // We'll place them at specific locations that work well with the 12 pentagons
     
@@ -114,23 +136,23 @@ fn identify_soccer_ball_hexagons() -> Vec<Vec3> {
     // These positions are carefully chosen to create a truncated icosahedron (soccer ball)
     vec![
         // Top ring (5 hexagons)
-        Vec3::new(0.5, 0.5, phi).normalize(),
-        Vec3::new(-0.5, 0.5, phi).normalize(),
-        Vec3::new(-0.5, -0.5, phi).normalize(),
-        Vec3::new(0.5, -0.5, phi).normalize(),
-        Vec3::new(0.0, 0.0, phi+0.2).normalize(),
+        Vec3::new(0.5, 0.5, phi).normalize() * radius,
+        Vec3::new(-0.5, 0.5, phi).normalize() * radius,
+        Vec3::new(-0.5, -0.5, phi).normalize() * radius,
+        Vec3::new(0.5, -0.5, phi).normalize() * radius,
+        Vec3::new(0.0, 0.0, phi+0.2).normalize() * radius,
         
         // Bottom ring (5 hexagons)
-        Vec3::new(0.5, 0.5, -phi).normalize(),
-        Vec3::new(-0.5, 0.5, -phi).normalize(),
-        Vec3::new(-0.5, -0.5, -phi).normalize(),
-        Vec3::new(0.5, -0.5, -phi).normalize(),
-        Vec3::new(0.0, 0.0, -phi-0.2).normalize(),
+        Vec3::new(0.5, 0.5, -phi).normalize() * radius,
+        Vec3::new(-0.5, 0.5, -phi).normalize() * radius,
+        Vec3::new(-0.5, -0.5, -phi).normalize() * radius,
+        Vec3::new(0.5, -0.5, -phi).normalize() * radius,
+        Vec3::new(0.0, 0.0, -phi-0.2).normalize() * radius,
     ]
 }
 
-/// Identify hexagon centers based on Goldberg parameters (h,k)
-fn identify_hexagon_centers(h: u32, k: u32) -> Vec<Vec3> {
+/// Identify hexagon centers based on Goldberg parameters (h,k) scaled to radius
+fn identify_hexagon_centers(h: u32, k: u32, radius: f32) -> Vec<Vec3> {
     let mut hexagon_centers = Vec::new();
     
     if h == 0 && k == 0 {
@@ -147,12 +169,13 @@ fn identify_hexagon_centers(h: u32, k: u32) -> Vec<Vec3> {
     // Step 1: Use face centers as a starting point
     let faces = get_icosahedron_faces();
     for face in faces {
-        let v1 = identify_pentagon_centers()[face[0]];
-        let v2 = identify_pentagon_centers()[face[1]];
-        let v3 = identify_pentagon_centers()[face[2]];
+        let pentagon_centers = identify_pentagon_centers(radius);
+        let v1 = pentagon_centers[face[0]];
+        let v2 = pentagon_centers[face[1]];
+        let v3 = pentagon_centers[face[2]];
         
         // Face center
-        let center = ((v1 + v2 + v3) / 3.0).normalize();
+        let center = ((v1 + v2 + v3) / 3.0).normalize() * radius;
         hexagon_centers.push(center);
         
         // For h > 1, add additional points along the edges
@@ -162,15 +185,15 @@ fn identify_hexagon_centers(h: u32, k: u32) -> Vec<Vec3> {
                 let t = i as f32 / h as f32;
                 
                 // Edge 1-2
-                let mid12 = (v1 * (1.0 - t) + v2 * t).normalize();
+                let mid12 = (v1 * (1.0 - t) + v2 * t).normalize() * radius;
                 hexagon_centers.push(mid12);
                 
                 // Edge 2-3
-                let mid23 = (v2 * (1.0 - t) + v3 * t).normalize();
+                let mid23 = (v2 * (1.0 - t) + v3 * t).normalize() * radius;
                 hexagon_centers.push(mid23);
                 
                 // Edge 3-1
-                let mid31 = (v3 * (1.0 - t) + v1 * t).normalize();
+                let mid31 = (v3 * (1.0 - t) + v1 * t).normalize() * radius;
                 hexagon_centers.push(mid31);
             }
         }
@@ -185,7 +208,7 @@ fn identify_hexagon_centers(h: u32, k: u32) -> Vec<Vec3> {
                     let c = 1.0 - a - b;
                     
                     if c > 0.0 {
-                        let point = (v1 * a + v2 * b + v3 * c).normalize();
+                        let point = (v1 * a + v2 * b + v3 * c).normalize() * radius;
                         hexagon_centers.push(point);
                     }
                 }
@@ -194,11 +217,11 @@ fn identify_hexagon_centers(h: u32, k: u32) -> Vec<Vec3> {
     }
     
     // Filter out centers that are too close to pentagon centers
-    let pentagon_centers = identify_pentagon_centers();
+    let pentagon_centers = identify_pentagon_centers(radius);
     hexagon_centers.retain(|center| {
         // Make sure it's not too close to any pentagon center
         for &pentagon_center in &pentagon_centers {
-            if center.distance(pentagon_center) < 0.2 {
+            if center.distance(pentagon_center) < 0.2 * radius {
                 return false;
             }
         }
@@ -210,7 +233,7 @@ fn identify_hexagon_centers(h: u32, k: u32) -> Vec<Vec3> {
     while i < hexagon_centers.len() {
         let mut j = i + 1;
         while j < hexagon_centers.len() {
-            if hexagon_centers[i].distance(hexagon_centers[j]) < 0.2 {
+            if hexagon_centers[i].distance(hexagon_centers[j]) < 0.2 * radius {
                 hexagon_centers.remove(j);
             } else {
                 j += 1;
@@ -234,13 +257,13 @@ fn identify_hexagon_centers(h: u32, k: u32) -> Vec<Vec3> {
         let y = phi.sin() * theta.sin();
         let z = phi.cos();
         
-        let new_point = Vec3::new(x, y, z).normalize();
+        let new_point = Vec3::new(x, y, z).normalize() * radius;
         
         // Check if it's too close to existing centers
         let mut too_close = false;
         
         for &center in &pentagon_centers {
-            if new_point.distance(center) < 0.2 {
+            if new_point.distance(center) < 0.2 * radius {
                 too_close = true;
                 break;
             }
@@ -248,7 +271,7 @@ fn identify_hexagon_centers(h: u32, k: u32) -> Vec<Vec3> {
         
         if !too_close {
             for &center in &hexagon_centers {
-                if new_point.distance(center) < 0.2 {
+                if new_point.distance(center) < 0.2 * radius {
                     too_close = true;
                     break;
                 }
@@ -438,4 +461,31 @@ fn print_tile_statistics(tile_map: &TileMap, h: u32, k: u32, indices: &[u32]) {
     
     let expected_triangles = indices.len() / 3;
     println!("Total triangles assigned: {} (expected {})", total_triangles, expected_triangles);
+}
+
+/// System to visualize tile centers using Gizmos (Bevy 0.16.1)
+pub fn visualize_goldberg_tiles(
+    mut gizmos: Gizmos,
+    tile_map: Option<Res<TileMap>>,
+) {
+    let Some(tile_map) = tile_map else {
+        // If no tile map resource exists yet, draw a test sphere
+        gizmos.sphere(Vec3::new(0.0, 0.0, 2.1), 0.1, Color::srgb(1.0, 0.0, 0.0));
+        return;
+    };
+
+    // Draw all tile centers
+    for tile in tile_map.tiles.iter() {
+        let (color, radius) = match tile.tile_type {
+            TileType::Pentagon => (Color::srgb(1.0, 0.0, 1.0), 0.08), // Magenta
+            TileType::Hexagon => (Color::srgb(1.0, 1.0, 0.0), 0.05),  // Yellow
+        };
+        
+        gizmos.sphere(tile.center, radius, color);
+    }
+}
+/// Minimal test system - just draw one sphere
+pub fn minimal_gizmo_test(mut gizmos: Gizmos) {
+    // Draw a simple test sphere that should definitely be visible
+    gizmos.sphere(Vec3::new(0.0, 0.0, 0.0), 0.5, Color::srgb(1.0, 0.0, 1.0));
 }
