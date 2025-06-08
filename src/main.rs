@@ -5,6 +5,7 @@ use miniature_potato::camera::{camera_controller, calculate_camera_transform, Or
 use miniature_potato::ray_casting::{
     ray_casting_system, debug_hovered_triangle, visualize_hit_point, HoveredTriangle
 };
+use miniature_potato::tiles::{tile_selection_system, visualize_tiles};
 use miniature_potato::world::setup_world;
 
 fn main() {
@@ -17,6 +18,8 @@ fn main() {
             ray_casting_system,
             debug_hovered_triangle,
             visualize_hit_point,
+            tile_selection_system,
+            visualize_tiles,
         ))
         .run();
 }

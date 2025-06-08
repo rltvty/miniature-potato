@@ -3,8 +3,9 @@
 use bevy::prelude::*;
 use crate::icosphere::Icosphere;
 use crate::ray_casting::IcosphereTriangles;
+use crate::tiles::{generate_tiles_from_icosphere, TileMap};
 
-/// Setup the basic world with an icosphere
+/// Setup the basic world with an icosphere and tile system
 pub fn setup_world(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -13,16 +14,28 @@ pub fn setup_world(
     // Create icosphere with 2 subdivisions for smoother surface
     let icosphere = Icosphere::new(2.0, 2);
     
-    // Check if we have the generate_with_data method, otherwise use generate
-    let (mesh, vertices, indices) = if let Ok((m, v, i)) = std::panic::catch_unwind(|| {
+    // Try to use generate_with_data if available, otherwise fallback
+    let (mesh, vertices, indices) = if std::panic::catch_unwind(|| {
         icosphere.generate_with_data()
-    }) {
-        (m, v, i)
+    }).is_ok() {
+        // If generate_with_data exists and works, use it
+        icosphere.generate_with_data()
     } else {
-        // Fallback to basic generate method for now
+        // Fallback: generate basic mesh and create dummy data
         let mesh = icosphere.generate();
+        println!("Warning: generate_with_data not available, using basic mesh");
         (mesh, Vec::new(), Vec::new())
     };
+
+    // Generate tile system from triangle data
+    let tile_map = if !vertices.is_empty() {
+        generate_tiles_from_icosphere(&vertices, &indices, 2)
+    } else {
+        TileMap::default()
+    };
+    
+    // Insert tile map as resource
+    commands.insert_resource(tile_map);
 
     // Spawn the icosphere that will represent our world
     let mut entity_commands = commands.spawn((
