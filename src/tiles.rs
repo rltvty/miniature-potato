@@ -35,7 +35,6 @@ pub struct TileVisual {
     pub is_highlighted: bool,
 }
 
-/// Generate tiles from icosphere triangle data with proper pentagon and hexagon identification
 /// Generate tiles based on vertex connectivity - proper hex/pentagon identification
 pub fn generate_tiles_from_icosphere(
     vertices: &[Vec3],
@@ -52,23 +51,19 @@ pub fn generate_tiles_from_icosphere(
     
     // Find pentagon centers (vertices with exactly 5 connections)
     let mut pentagon_centers = Vec::new();
-    let mut pentagon_vertex_indices = Vec::new();
     
     for (vertex_idx, connections) in vertex_connections.iter().enumerate() {
         if connections.len() == 5 {
             pentagon_centers.push(vertices[vertex_idx]);
-            pentagon_vertex_indices.push(vertex_idx);
         }
     }
     
     // Find hexagon centers (vertices with exactly 6 connections)
     let mut hexagon_centers = Vec::new();
-    let mut hexagon_vertex_indices = Vec::new();
     
     for (vertex_idx, connections) in vertex_connections.iter().enumerate() {
         if connections.len() == 6 {
             hexagon_centers.push(vertices[vertex_idx]);
-            hexagon_vertex_indices.push(vertex_idx);
         }
     }
     
@@ -112,11 +107,11 @@ pub fn generate_tiles_from_icosphere(
     for (pentagon_idx, &pentagon_center) in pentagon_centers.iter().enumerate() {
         let triangle_indices = pentagon_triangles.get(&pentagon_idx).unwrap().clone();
         
-        if !triangle_indices.is_empty() { // Only create tiles that have triangles
+        if !triangle_indices.is_empty() {
             let tile = Tile {
                 tile_type: TileType::Pentagon,
                 center: pentagon_center,
-                neighbors: Vec::new(), // Will compute later
+                neighbors: Vec::new(),
                 triangle_indices: triangle_indices.clone(),
             };
             
@@ -124,7 +119,6 @@ pub fn generate_tiles_from_icosphere(
             tile_map.pentagon_indices.push(tile_idx);
             tile_map.tiles.push(tile);
             
-            // Map all triangles belonging to this pentagon
             for triangle_idx in triangle_indices {
                 tile_map.triangle_to_tile.insert(triangle_idx, tile_idx);
             }
@@ -135,11 +129,11 @@ pub fn generate_tiles_from_icosphere(
     for (hexagon_idx, &hexagon_center) in hexagon_centers.iter().enumerate() {
         let triangle_indices = hexagon_triangles.get(&hexagon_idx).unwrap().clone();
         
-        if !triangle_indices.is_empty() { // Only create tiles that have triangles
+        if !triangle_indices.is_empty() {
             let tile = Tile {
                 tile_type: TileType::Hexagon,
                 center: hexagon_center,
-                neighbors: Vec::new(), // Will compute later
+                neighbors: Vec::new(),
                 triangle_indices: triangle_indices.clone(),
             };
             
@@ -147,7 +141,6 @@ pub fn generate_tiles_from_icosphere(
             tile_map.hexagon_indices.push(tile_idx);
             tile_map.tiles.push(tile);
             
-            // Map all triangles belonging to this hexagon
             for triangle_idx in triangle_indices {
                 tile_map.triangle_to_tile.insert(triangle_idx, tile_idx);
             }
@@ -160,7 +153,7 @@ pub fn generate_tiles_from_icosphere(
     println!("Total triangles assigned: {}", tile_map.triangle_to_tile.len());
     println!("Total triangles in mesh: {}", indices.len() / 3);
     
-    // Debug: Analyze triangle distribution per tile
+    // Debug analysis
     println!("\n=== TILE ANALYSIS ===");
     let mut pentagon_triangle_counts = Vec::new();
     let mut hexagon_triangle_counts = Vec::new();
@@ -198,26 +191,21 @@ pub fn generate_tiles_from_icosphere(
     println!("Expected: Always 12 pentagons, variable hexagons based on subdivision level");
     println!("======================\n");
     
-    // TODO: Compute neighbor relationships
-    
     tile_map
 }
 
-/// Build a map of vertex connectivity (which vertices are connected to each vertex)
+/// Build a map of vertex connectivity
 fn build_vertex_connectivity(indices: &[u32]) -> Vec<std::collections::HashSet<usize>> {
     let mut connections: Vec<std::collections::HashSet<usize>> = Vec::new();
     
-    // Find the maximum vertex index to size our vector
     let max_vertex = indices.iter().max().unwrap_or(&0);
     connections.resize((*max_vertex as usize) + 1, std::collections::HashSet::new());
     
-    // For each triangle, add connections between all vertex pairs
     for triangle in indices.chunks(3) {
         let v0 = triangle[0] as usize;
         let v1 = triangle[1] as usize;
         let v2 = triangle[2] as usize;
         
-        // Add bidirectional connections
         connections[v0].insert(v1);
         connections[v0].insert(v2);
         connections[v1].insert(v0);
@@ -228,13 +216,13 @@ fn build_vertex_connectivity(indices: &[u32]) -> Vec<std::collections::HashSet<u
     
     connections
 }
+
 /// Find the closest tile center (pentagon or hexagon) to a given point
 fn find_closest_tile_center(point: Vec3, pentagon_centers: &[Vec3], hexagon_centers: &[Vec3]) -> (TileType, usize) {
     let mut min_distance = f32::INFINITY;
     let mut closest_type = TileType::Pentagon;
     let mut closest_idx = 0;
     
-    // Check pentagon centers
     for (idx, &center) in pentagon_centers.iter().enumerate() {
         let distance = (point - center).length();
         if distance < min_distance {
@@ -244,7 +232,6 @@ fn find_closest_tile_center(point: Vec3, pentagon_centers: &[Vec3], hexagon_cent
         }
     }
     
-    // Check hexagon centers
     for (idx, &center) in hexagon_centers.iter().enumerate() {
         let distance = (point - center).length();
         if distance < min_distance {
@@ -256,7 +243,6 @@ fn find_closest_tile_center(point: Vec3, pentagon_centers: &[Vec3], hexagon_cent
     
     (closest_type, closest_idx)
 }
-
 
 /// System to handle tile selection from ray casting
 pub fn tile_selection_system(
@@ -283,6 +269,7 @@ pub fn visualize_tiles(
     mut gizmos: Gizmos,
     tile_map: Res<TileMap>,
     hovered_triangle: Res<crate::ray_casting::HoveredTriangle>,
+    mut last_hovered_tile: Local<Option<usize>>, // Track last hovered tile to prevent spam
 ) {
     // Draw all tile centers with different colors and sizes
     for tile in tile_map.tiles.iter() {
@@ -303,17 +290,27 @@ pub fn visualize_tiles(
             };
             gizmos.sphere(tile.center, highlight_size, Color::srgb(1.0, 1.0, 0.0)); // Yellow highlight
             
+            // Only print debug info when we hover a new tile (not continuously)
+            if *last_hovered_tile != Some(tile_idx) {
+                *last_hovered_tile = Some(tile_idx);
+                println!("Hovered {:?} {} covers {} triangles", 
+                    tile.tile_type, tile_idx, tile.triangle_indices.len());
+            }
+            
             // Draw different shapes around tile types when hovered
             match tile.tile_type {
                 TileType::Pentagon => {
-                    // Draw a wireframe circle around the pentagon
                     draw_circle_around_tile(&mut gizmos, tile.center, 0.18, Color::srgb(1.0, 0.8, 0.0)); // Orange circle
                 }
                 TileType::Hexagon => {
-                    // Draw a wireframe hexagon around the hexagon
                     draw_hexagon_around_tile(&mut gizmos, tile.center, 0.15, Color::srgb(0.0, 1.0, 1.0)); // Cyan hexagon
                 }
             }
+        }
+    } else {
+        // Reset when not hovering any tile
+        if last_hovered_tile.is_some() {
+            *last_hovered_tile = None;
         }
     }
 }
@@ -324,7 +321,6 @@ fn draw_circle_around_tile(gizmos: &mut Gizmos, center: Vec3, radius: f32, color
     let right = center.cross(up).normalize();
     let forward = right.cross(center).normalize();
     
-    // Draw circle segments
     for i in 0..32 {
         let angle1 = (i as f32 / 32.0) * 2.0 * std::f32::consts::PI;
         let angle2 = ((i + 1) as f32 / 32.0) * 2.0 * std::f32::consts::PI;
@@ -342,7 +338,6 @@ fn draw_hexagon_around_tile(gizmos: &mut Gizmos, center: Vec3, radius: f32, colo
     let right = center.cross(up).normalize();
     let forward = right.cross(center).normalize();
     
-    // Draw hexagon (6 sides)
     for i in 0..6 {
         let angle1 = (i as f32 / 6.0) * 2.0 * std::f32::consts::PI;
         let angle2 = ((i + 1) as f32 / 6.0) * 2.0 * std::f32::consts::PI;
