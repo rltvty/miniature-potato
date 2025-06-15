@@ -3,9 +3,18 @@ name = "miniature-potato"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "miniature-potato"
+path = "src/main.rs"
+
+[[bin]]
+name = "miniature-potato-geotiles"
+path = "src/main_geotiles.rs"
+
 [dependencies]
 bevy = { version = "0.16.1", features = ["dynamic_linking"] }
 rand = "0.8.5"
+geotiles = { git = "https://github.com/rltvty/geotiles" }
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
