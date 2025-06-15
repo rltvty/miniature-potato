@@ -2,6 +2,8 @@
 
 use bevy::prelude::*;
 use bevy::pbr::wireframe::{WireframePlugin, WireframeConfig};
+use bevy::dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin};
+use bevy::text::FontSmoothing;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use bevy::window::WindowPlugin;
 use std::env;
@@ -18,6 +20,9 @@ struct ScreenshotTimer {
     should_screenshot: bool,
     exit_timer: Option<Timer>,
 }
+
+static TEXT_COLOR: Color = Color::srgb(0.9, 0.9, 0.9);
+const TEXT_SIZE: f32 = 15.0;
 
 fn main() {
     println!("🚀 Starting miniature-potato with geotiles geodesic polyhedron");
@@ -68,6 +73,24 @@ fn main() {
     app.add_plugins((
         WireframePlugin::default(),
         PanOrbitCameraPlugin,
+        FpsOverlayPlugin {
+            config: FpsOverlayConfig {
+                text_config: TextFont {
+                    // Here we define size of our overlay
+                    font_size: TEXT_SIZE,
+                    // If we want, we can use a custom font
+                    font: default(),
+                    // We could also disable font smoothing,
+                    font_smoothing: FontSmoothing::default(),
+                    ..default()
+                },
+                // We can also change color of the overlay
+                text_color: TEXT_COLOR,
+                // We can also set the refresh interval for the FPS counter
+                refresh_interval: core::time::Duration::from_millis(100),
+                enabled: true,
+            },
+        },
     ));
     
     app.add_systems(Startup, (
@@ -168,22 +191,21 @@ fn update_hovered_tile_ui(
                     let lat_lon = tile.get_lat_lon(hexasphere.hexasphere.radius);
                     
                     **text = format!(
-                        "Hovered: {} #{}\nType: {}\nCenter: ({:.2}, {:.2}, {:.2})\nLat/Lon: {:.1}°, {:.1}°\nNeighbors: {}",
-                        tile_type,
-                        hovered_index,
+                        "Type: {}\nCenter: ({:.2}, {:.2}, {:.2})\nLat/Lon: {:.1}°, {:.1}°\nNeighbors: {}\nHovered: {}",
                         tile_type,
                         center.x, center.y, center.z,
                         lat_lon.lat, lat_lon.lon,
-                        tile.neighbors.len()
+                        tile.neighbors.len(),
+                        hovered_index,
                     );
                 } else {
-                    **text = "Hovered: Invalid tile".to_string();
+                    **text = "Type:\nCenter:\nLat/Lon:\nNeighbors:\nHovered: Invalid tile".to_string();
                 }
             } else {
-                **text = "Hovered: None".to_string();
+                **text = "Type:\nCenter:\nLat/Lon:\nNeighbors:\nHovered: None".to_string();
             }
         } else {
-            **text = "Hovered: Loading...".to_string();
+            **text = "Type:\nCenter:\nLat/Lon:\nNeighbors:\nHovered: Loading...".to_string();
         }
     }
 }
@@ -333,13 +355,13 @@ fn setup_ui(mut commands: Commands) {
             * Esc: Quit"
         ),
         TextFont {
-            font_size: 16.0,
+            font_size: TEXT_SIZE,
             ..default()
         },
-        TextColor(Color::srgb(0.9, 0.9, 0.9)),
+        TextColor(TEXT_COLOR),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(12.0),
+            top: Val::Px(24.0),
             left: Val::Px(12.0),
             ..default()
         },
@@ -349,10 +371,10 @@ fn setup_ui(mut commands: Commands) {
     commands.spawn((
         Text::new("Sphere Info:\nLoading..."),
         TextFont {
-            font_size: 14.0,
+            font_size: TEXT_SIZE,
             ..default()
         },
-        TextColor(Color::srgb(0.7, 0.9, 1.0)), // Light blue color for sphere info
+        TextColor(TEXT_COLOR),
         Node {
             position_type: PositionType::Absolute,
             top: Val::Px(12.0),
@@ -366,10 +388,10 @@ fn setup_ui(mut commands: Commands) {
     commands.spawn((
         Text::new("Hovered: None"),
         TextFont {
-            font_size: 16.0,
+            font_size: TEXT_SIZE,
             ..default()
         },
-        TextColor(Color::srgb(0.9, 0.9, 0.9)),
+        TextColor(TEXT_COLOR),
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(12.0),
@@ -383,10 +405,10 @@ fn setup_ui(mut commands: Commands) {
     commands.spawn((
         Text::new("Selected: None"),
         TextFont {
-            font_size: 18.0,
+            font_size: TEXT_SIZE,
             ..default()
         },
-        TextColor(Color::srgb(1.0, 1.0, 0.3)), // Yellow color for selected
+        TextColor(TEXT_COLOR),
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(12.0),
