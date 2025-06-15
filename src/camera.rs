@@ -1,24 +1,18 @@
-//! Camera controls for orbital movement around the sphere
+//! Camera controls with sphere rotation
 
 use bevy::prelude::*;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 
-/// Component to mark our orbit camera
+/// Component to mark our camera
 #[derive(Component)]
 pub struct OrbitCamera {
-    /// Distance from the target (sphere center)
-    pub distance: f32,
-    /// Horizontal rotation angle in radians
-    pub yaw: f32,
-    /// Vertical rotation angle in radians  
-    pub pitch: f32,
-    /// Point the camera orbits around
-    pub target: Vec3,
-    /// Camera movement sensitivity
-    pub sensitivity: f32,
+    /// Camera position
+    pub position: Vec3,
+    /// Camera movement sensitivity for WASD
+    pub move_sensitivity: f32,
     /// Zoom sensitivity
     pub zoom_sensitivity: f32,
-    /// Min/max zoom distances
+    /// Min/max zoom distances from origin
     pub min_distance: f32,
     pub max_distance: f32,
 }
@@ -26,91 +20,117 @@ pub struct OrbitCamera {
 impl Default for OrbitCamera {
     fn default() -> Self {
         Self {
-            distance: 15.0, // Zoom out much further to see the full structure
-            yaw: 0.0,
-            pitch: 0.3, // Start slightly above the sphere
-            target: Vec3::ZERO,
-            sensitivity: 0.005,
-            zoom_sensitivity: 0.5,
+            position: Vec3::new(0.0, 0.0, 15.0), // Camera starts 15 units back on Z axis
+            move_sensitivity: 5.0,
+            zoom_sensitivity: 1.0,
             min_distance: 2.5,
-            max_distance: 20.0,
+            max_distance: 50.0,
         }
     }
 }
 
-/// Camera controller system for mouse orbit, zoom, and WASD panning
+/// Resource to track sphere rotation
+#[derive(Resource, Default)]
+pub struct SphereRotation {
+    /// Current rotation of the sphere
+    pub rotation: Quat,
+    /// Mouse sensitivity for rotation
+    pub sensitivity: f32,
+}
+
+impl SphereRotation {
+    pub fn new() -> Self {
+        Self {
+            rotation: Quat::IDENTITY,
+            sensitivity: 0.005,
+        }
+    }
+}
+
+/// Camera controller system - mouse rotates sphere, WASD moves camera freely
 pub fn camera_controller(
     mut mouse_motion_events: EventReader<MouseMotion>,
     mut mouse_wheel_events: EventReader<MouseWheel>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut camera_query: Query<(&mut OrbitCamera, &mut Transform)>,
+    mut sphere_rotation: ResMut<SphereRotation>,
     time: Res<Time>,
 ) {
     if let Ok((mut orbit_camera, mut transform)) = camera_query.single_mut() {
-        // Handle mouse rotation (only when right mouse button is held to avoid conflicts with tile selection)
+        // Handle mouse rotation - rotates the sphere, not the camera
         if mouse_button_input.pressed(MouseButton::Right) {
             for event in mouse_motion_events.read() {
-                orbit_camera.yaw -= event.delta.x * orbit_camera.sensitivity;
-                orbit_camera.pitch -= event.delta.y * orbit_camera.sensitivity;
+                // Create rotation deltas
+                let yaw_delta = -event.delta.x * sphere_rotation.sensitivity;
+                let pitch_delta = -event.delta.y * sphere_rotation.sensitivity;
                 
-                // Clamp pitch to prevent camera flipping
-                orbit_camera.pitch = orbit_camera.pitch.clamp(-1.54, 1.54); // Almost ±90 degrees
+                // Apply rotations to sphere
+                let yaw_rotation = Quat::from_axis_angle(Vec3::Y, yaw_delta);
+                let pitch_rotation = Quat::from_axis_angle(Vec3::X, pitch_delta);
+                
+                // Combine rotations with existing sphere rotation
+                sphere_rotation.rotation = yaw_rotation * sphere_rotation.rotation * pitch_rotation;
             }
         } else {
             // Clear events if not rotating to prevent accumulation
             mouse_motion_events.clear();
         }
         
-        // Handle mouse wheel zoom
+        // Handle mouse wheel zoom - move camera along its forward direction
         for event in mouse_wheel_events.read() {
-            orbit_camera.distance -= event.y * orbit_camera.zoom_sensitivity;
-            orbit_camera.distance = orbit_camera.distance.clamp(
-                orbit_camera.min_distance, 
-                orbit_camera.max_distance
-            );
+            let forward = transform.rotation * Vec3::NEG_Z; // Forward is -Z in Bevy
+            let zoom_amount = event.y * orbit_camera.zoom_sensitivity;
+            orbit_camera.position += forward * zoom_amount;
+            
+            // Clamp distance from origin to prevent getting too close/far
+            let distance_from_origin = orbit_camera.position.length();
+            if distance_from_origin < orbit_camera.min_distance {
+                orbit_camera.position = orbit_camera.position.normalize() * orbit_camera.min_distance;
+            } else if distance_from_origin > orbit_camera.max_distance {
+                orbit_camera.position = orbit_camera.position.normalize() * orbit_camera.max_distance;
+            }
         }
         
-        // Handle WASD panning
-        let mut pan_vector = Vec3::ZERO;
-        let pan_speed = 2.0 * time.delta_secs();
+        // Handle WASD camera movement - move in camera-relative directions
+        let mut move_vector = Vec3::ZERO;
+        let move_speed = orbit_camera.move_sensitivity * time.delta_secs();
         
         if keyboard_input.pressed(KeyCode::KeyW) {
-            pan_vector.z -= pan_speed;
+            move_vector.z -= move_speed; // Forward
         }
         if keyboard_input.pressed(KeyCode::KeyS) {
-            pan_vector.z += pan_speed;
+            move_vector.z += move_speed; // Backward
         }
         if keyboard_input.pressed(KeyCode::KeyA) {
-            pan_vector.x -= pan_speed;
+            move_vector.x -= move_speed; // Left
         }
         if keyboard_input.pressed(KeyCode::KeyD) {
-            pan_vector.x += pan_speed;
+            move_vector.x += move_speed; // Right
         }
         
-        // Apply panning to the target (what we orbit around)
-        if pan_vector.length() > 0.0 {
-            // Transform the pan vector relative to the camera's current orientation
-            let camera_transform = calculate_camera_transform(&orbit_camera);
-            let right = camera_transform.rotation * Vec3::X;
-            let forward = camera_transform.rotation * Vec3::Z;
+        // Apply camera movement in world space relative to camera orientation
+        if move_vector.length() > 0.0 {
+            let right = transform.rotation * Vec3::X;
+            let forward = transform.rotation * Vec3::NEG_Z; // Forward is -Z in Bevy
+            let up = transform.rotation * Vec3::Y;
             
-            orbit_camera.target += right * pan_vector.x + forward * pan_vector.z;
+            orbit_camera.position += right * move_vector.x + up * move_vector.y + forward * move_vector.z;
         }
         
-        // Update camera transform based on orbit parameters
-        *transform = calculate_camera_transform(&orbit_camera);
+        // Update camera transform - keep current orientation, don't always look at origin
+        transform.translation = orbit_camera.position;
+        // Don't call look_at - maintain the camera's current forward direction
     }
 }
 
-/// Calculate camera transform from orbit parameters
-pub fn calculate_camera_transform(orbit_camera: &OrbitCamera) -> Transform {
-    // Calculate position using spherical coordinates
-    let x = orbit_camera.distance * orbit_camera.pitch.cos() * orbit_camera.yaw.sin();
-    let y = orbit_camera.distance * orbit_camera.pitch.sin();
-    let z = orbit_camera.distance * orbit_camera.pitch.cos() * orbit_camera.yaw.cos();
-    
-    let position = orbit_camera.target + Vec3::new(x, y, z);
-    
-    Transform::from_translation(position).looking_at(orbit_camera.target, Vec3::Y)
+/// System to apply sphere rotation to all tile entities
+pub fn rotate_sphere_system(
+    sphere_rotation: Res<SphereRotation>,
+    mut tile_query: Query<&mut Transform, (With<crate::geotiles_bevy::TileComponent>, Without<OrbitCamera>)>,
+) {
+    for mut transform in tile_query.iter_mut() {
+        // Apply the sphere rotation to each tile's base transform
+        transform.rotation = sphere_rotation.rotation;
+    }
 }

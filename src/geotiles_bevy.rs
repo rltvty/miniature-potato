@@ -93,8 +93,8 @@ pub fn setup_hexasphere_world(
         selected_tile: None,
     });
     
-    // Insert border visibility resource - turn on borders to see tile colors better
-    commands.insert_resource(BorderVisibility { show_borders: true });
+    // Insert border visibility resource - off by default, use wireframe mode instead
+    commands.insert_resource(BorderVisibility { show_borders: false });
     
     // Insert normal visibility resource
     commands.insert_resource(ShowNormals { show_normals: false });
@@ -198,13 +198,14 @@ fn create_regular_polygon_mesh(sides: usize, radius: f32) -> Mesh {
     create_regular_polygon_mesh_with_normal(sides, radius, Vec3::Y)
 }
 
-/// System to handle tile hover with materials
+/// System to handle tile hover with materials using improved distance-based detection
 pub fn tile_hover_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut hexasphere_res: ResMut<HexasphereResource>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     window_query: Query<&Window>,
-    tile_query: Query<(&TileComponent, &GlobalTransform, &MeshMaterial3d<StandardMaterial>)>,
+    tile_query: Query<(Entity, &TileComponent, &MeshMaterial3d<StandardMaterial>, &GlobalTransform)>,
+    sphere_rotation: Res<crate::camera::SphereRotation>,
 ) {
     let Ok(window) = window_query.single() else { return };
     let Some(cursor_pos) = window.cursor_position() else { return };
@@ -212,37 +213,51 @@ pub fn tile_hover_system(
     
     let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) else { return };
     
-    // Find closest tile to ray
+    // Find closest tile to ray using improved distance calculation
     let mut closest_tile = None;
     let mut closest_distance = f32::MAX;
     
-    for (tile_component, tile_transform, _) in tile_query.iter() {
-        let tile_pos = tile_transform.translation();
-        let to_tile = tile_pos - ray.origin;
-        let proj_length = to_tile.dot(*ray.direction);
+    for (_entity, tile_component, _, _tile_transform) in tile_query.iter() {
+        // Get the tile center from the thick tile data and apply sphere rotation
+        let thick_tile = &hexasphere_res.thick_tiles[tile_component.index];
+        let original_center = Vec3::new(
+            thick_tile.center_point.x as f32,
+            thick_tile.center_point.y as f32,
+            thick_tile.center_point.z as f32,
+        );
         
-        if proj_length > 0.0 {
-            let closest_point = ray.origin + ray.direction * proj_length;
-            let distance = (closest_point - tile_pos).length();
-            
-            if distance < closest_distance && distance < 1.0 {
-                closest_distance = distance;
-                closest_tile = Some(tile_component.index);
-            }
+        // Apply the current sphere rotation to get the actual world position
+        let rotated_center = sphere_rotation.rotation * original_center;
+        
+        // Calculate closest point on ray to tile center
+        let to_center = rotated_center - ray.origin;
+        let proj_length = to_center.dot(*ray.direction).max(0.0);
+        let closest_point_on_ray = ray.origin + ray.direction * proj_length;
+        let distance_to_center = (closest_point_on_ray - rotated_center).length();
+        
+        // Use a reasonable detection radius based on tile size
+        let detection_radius = if thick_tile.is_hexagon { 0.8 } else { 0.7 }; // Pentagon slightly smaller
+        
+        if distance_to_center < detection_radius && proj_length < closest_distance {
+            closest_distance = proj_length;
+            closest_tile = Some(tile_component.index);
         }
     }
+    
+    // Note: Tile selection is handled in main.rs handle_tile_selection system
+    // This system only handles hover detection
     
     // Update hover state
     if closest_tile != hexasphere_res.hovered_tile {
         // Reset previous tile color
         if let Some(prev_index) = hexasphere_res.hovered_tile {
-            for (tile_component, _, material_handle) in tile_query.iter() {
+            for (_, tile_component, material_handle, _) in tile_query.iter() {
                 if tile_component.index == prev_index {
-                    if let Some(material) = materials.get_mut(material_handle) {
+                    if let Some(material) = materials.get_mut(&material_handle.0) {
                         material.base_color = if tile_component.is_pentagon {
-                            Color::srgb(0.8, 0.3, 0.8)
+                            Color::srgb(1.0, 0.4, 1.0) // Brighter magenta for pentagons
                         } else {
-                            Color::srgb(0.3, 0.7, 0.3)
+                            Color::srgb(0.4, 1.0, 0.4) // Brighter green for hexagons
                         };
                         material.emissive = LinearRgba::BLACK;
                     }
@@ -253,9 +268,9 @@ pub fn tile_hover_system(
         
         // Highlight new tile
         if let Some(tile_index) = closest_tile {
-            for (tile_component, _, material_handle) in tile_query.iter() {
+            for (_, tile_component, material_handle, _) in tile_query.iter() {
                 if tile_component.index == tile_index {
-                    if let Some(material) = materials.get_mut(material_handle) {
+                    if let Some(material) = materials.get_mut(&material_handle.0) {
                         material.base_color = Color::srgb(1.0, 1.0, 0.3);
                         material.emissive = LinearRgba::rgb(0.5, 0.5, 0.0);
                     }
@@ -277,51 +292,31 @@ pub fn tile_hover_system(
 pub fn tile_gizmos_system(
     mut gizmos: Gizmos,
     hexasphere_res: Res<HexasphereResource>,
-    show_borders: Res<BorderVisibility>,
     show_normals: Res<ShowNormals>,
+    sphere_rotation: Res<crate::camera::SphereRotation>,
 ) {
-    // Draw tile centers using thick tiles
+    // Only draw normals and selection highlights, not borders (borders are handled by wireframe mode)
     for (index, thick_tile) in hexasphere_res.thick_tiles.iter().enumerate() {
-        let center = Vec3::new(
+        let original_center = Vec3::new(
             thick_tile.center_point.x as f32,
             thick_tile.center_point.y as f32,
             thick_tile.center_point.z as f32,
         );
         
-        let is_pentagon = !thick_tile.is_hexagon;
-        let is_hovered = hexasphere_res.hovered_tile == Some(index);
+        // Apply sphere rotation to get current world position
+        let rotated_center = sphere_rotation.rotation * original_center;
+        
         let is_selected = hexasphere_res.selected_tile == Some(index);
         
-        // Choose color based on state
-        let color = if is_selected {
-            Color::srgb(1.0, 0.0, 0.0) // Red for selected
-        } else if is_hovered {
-            Color::srgb(1.0, 1.0, 0.0) // Yellow for hovered
-        } else if is_pentagon {
-            Color::srgb(0.8, 0.3, 0.8) // Magenta for pentagons
-        } else {
-            Color::srgb(0.3, 0.7, 0.3) // Green for hexagons
-        };
-        
-        // Draw center sphere
-        let radius = if is_pentagon { 0.05 } else { 0.03 };
-        gizmos.sphere(center, radius, color);
-        
-        // Draw borders if enabled
-        if show_borders.show_borders {
-            draw_thick_tile_border(&mut gizmos, thick_tile, color);
-        }
-        
-        // Draw selection highlight (larger sphere)
+        // Draw selection highlight as a wireframe outline with rotation applied
         if is_selected {
-            let highlight_radius = if is_pentagon { 0.08 } else { 0.06 };
-            gizmos.sphere(center, highlight_radius, Color::srgb(1.0, 1.0, 1.0));
+            draw_thick_tile_border_rotated(&mut gizmos, thick_tile, Color::srgb(1.0, 1.0, 1.0), sphere_rotation.rotation);
         }
         
         // Draw normal vectors if enabled
         if show_normals.show_normals {
-            let normal_end = center + center.normalize() * 0.2; // Normal pointing outward from sphere center
-            gizmos.line(center, normal_end, Color::srgb(0.0, 1.0, 1.0)); // Cyan for normals
+            let normal_end = rotated_center + rotated_center.normalize() * 0.2; // Normal pointing outward from sphere center
+            gizmos.line(rotated_center, normal_end, Color::srgb(0.0, 1.0, 1.0)); // Cyan for normals
         }
     }
 }
@@ -345,6 +340,23 @@ fn draw_thick_tile_border(gizmos: &mut Gizmos, thick_tile: &ThickTile, color: Co
         .collect();
     
     // Draw lines between boundary points
+    for i in 0..boundary_points.len() {
+        let start = boundary_points[i];
+        let end = boundary_points[(i + 1) % boundary_points.len()];
+        gizmos.line(start, end, color);
+    }
+}
+
+/// Draw borders around a thick tile with rotation applied
+fn draw_thick_tile_border_rotated(gizmos: &mut Gizmos, thick_tile: &ThickTile, color: Color, rotation: Quat) {
+    let boundary_points: Vec<Vec3> = thick_tile.outer_boundary.iter()
+        .map(|p| {
+            let original_point = Vec3::new(p.x as f32, p.y as f32, p.z as f32);
+            rotation * original_point // Apply rotation
+        })
+        .collect();
+    
+    // Draw lines between rotated boundary points
     for i in 0..boundary_points.len() {
         let start = boundary_points[i];
         let end = boundary_points[(i + 1) % boundary_points.len()];

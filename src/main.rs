@@ -5,7 +5,7 @@ use bevy::pbr::wireframe::{WireframePlugin, WireframeConfig};
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use bevy::window::WindowPlugin;
 use std::env;
-use miniature_potato::camera::{camera_controller, calculate_camera_transform, OrbitCamera};
+use miniature_potato::camera::{camera_controller, rotate_sphere_system, OrbitCamera, SphereRotation};
 use miniature_potato::geotiles_bevy::{
     setup_hexasphere_world, tile_hover_system, tile_gizmos_system, toggle_borders, toggle_normals,
     HexasphereResource
@@ -52,7 +52,9 @@ fn main() {
         ));
     }
     
-    app.add_systems(Startup, (setup_hexasphere_world, setup_camera));
+    app
+        .insert_resource(SphereRotation::new())
+        .add_systems(Startup, (setup_hexasphere_world, setup_camera));
     
     if screenshot_mode {
         app.insert_resource(ScreenshotTimer {
@@ -60,8 +62,23 @@ fn main() {
             should_screenshot: true,
             exit_timer: None,
         })
-        .insert_resource(WireframeConfig { 
-            global: false, // Disable wireframe to see colored tiles
+        .add_systems(Update, (
+            handle_escape_key,
+            toggle_wireframe,
+            toggle_borders,
+            toggle_normals,
+            print_tile_info,
+            print_hovered_tile_info,
+            handle_tile_selection,
+            camera_controller,
+            rotate_sphere_system,
+            tile_hover_system,
+            tile_gizmos_system,
+            screenshot_system,
+        ));
+    } else {
+        app.insert_resource(WireframeConfig { 
+            global: false, // Disable wireframe by default
             default_color: Color::WHITE,
         })
         .add_systems(Update, (
@@ -73,20 +90,7 @@ fn main() {
             print_hovered_tile_info,
             handle_tile_selection,
             camera_controller,
-            tile_hover_system,
-            tile_gizmos_system,
-            screenshot_system,
-        ));
-    } else {
-        app.add_systems(Update, (
-            handle_escape_key,
-            toggle_wireframe,
-            toggle_borders,
-            toggle_normals,
-            print_tile_info,
-            print_hovered_tile_info,
-            handle_tile_selection,
-            camera_controller,
+            rotate_sphere_system,
             tile_hover_system,
             tile_gizmos_system,
         ));
@@ -225,10 +229,13 @@ fn handle_tile_selection(
     }
 }
 
-/// Setup the camera with orbit controls
+/// Setup the camera with controls
 fn setup_camera(mut commands: Commands) {
     let orbit_camera = OrbitCamera::default();
-    let transform = calculate_camera_transform(&orbit_camera);
+    
+    // Initialize camera looking at origin, but after this it moves freely
+    let transform = Transform::from_translation(orbit_camera.position)
+        .looking_at(Vec3::ZERO, Vec3::Y);
     
     commands.spawn((
         Camera3d::default(),
@@ -238,12 +245,11 @@ fn setup_camera(mut commands: Commands) {
     
     println!("📷 Camera initialized");
     println!("   Controls:");
-    println!("     • Right mouse drag: Rotate camera");
-    println!("     • Mouse wheel: Zoom in/out");
-    println!("     • WASD: Pan camera");
+    println!("     • Right mouse drag: Rotate sphere");
+    println!("     • Mouse wheel: Zoom camera forward/back");
+    println!("     • WASD: Move camera up/down/left/right");
     println!("     • Left click: Select/deselect tile");
-    println!("     • Space: Toggle wireframe");
-    println!("     • B: Toggle tile borders");
+    println!("     • Space: Toggle wireframe mode");
     println!("     • N: Toggle normal visualization");
     println!("     • I: Print hexasphere info");
     println!("     • H: Print hovered tile info");
