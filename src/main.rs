@@ -5,7 +5,7 @@ use bevy::pbr::wireframe::{WireframePlugin, WireframeConfig};
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use bevy::window::WindowPlugin;
 use std::env;
-use miniature_potato::camera::{camera_controller, rotate_sphere_system, OrbitCamera, SphereRotation};
+use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use miniature_potato::geotiles_bevy::{
     setup_hexasphere_world, tile_hover_system, tile_gizmos_system, toggle_borders, toggle_normals,
     HexasphereResource
@@ -44,17 +44,18 @@ fn main() {
                 ..default()
             }),
             WireframePlugin::default(),
+            PanOrbitCameraPlugin,
         ));
     } else {
         app.add_plugins((
             DefaultPlugins,
             WireframePlugin::default(),
+            PanOrbitCameraPlugin,
         ));
     }
     
     app
-        .insert_resource(SphereRotation::new())
-        .add_systems(Startup, (setup_hexasphere_world, setup_camera, setup_ui));
+        .add_systems(Startup, (setup_hexasphere_world, setup_ui));
     
     if screenshot_mode {
         app.insert_resource(ScreenshotTimer {
@@ -69,8 +70,6 @@ fn main() {
             toggle_normals,
             print_tile_info,
             handle_tile_selection,
-            camera_controller,
-            rotate_sphere_system,
             tile_hover_system,
             tile_gizmos_system,
             update_hovered_tile_ui,
@@ -90,8 +89,6 @@ fn main() {
             toggle_normals,
             print_tile_info,
             handle_tile_selection,
-            camera_controller,
-            rotate_sphere_system,
             tile_hover_system,
             tile_gizmos_system,
             update_hovered_tile_ui,
@@ -129,7 +126,6 @@ fn toggle_wireframe(
 fn print_tile_info(
     keyboard: Res<ButtonInput<KeyCode>>,
     hexasphere_res: Option<Res<HexasphereResource>>,
-    camera_query: Query<&Transform, With<OrbitCamera>>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyI) {
         if let Some(hexasphere) = hexasphere_res {
@@ -148,17 +144,6 @@ fn print_tile_info(
             println!("Sphere radius: {}", hexasphere.hexasphere.radius);
             println!("Uniform hexagon radius: {:.3}", hexasphere.uniform_radius);
             
-            // Check camera position relative to sphere
-            if let Ok(camera_transform) = camera_query.single() {
-                let distance_from_center = camera_transform.translation.length();
-                println!("\n📷 Camera Info:");
-                println!("Position: ({:.2}, {:.2}, {:.2})", 
-                    camera_transform.translation.x,
-                    camera_transform.translation.y, 
-                    camera_transform.translation.z);
-                println!("Distance from center: {:.2}", distance_from_center);
-                println!("Inside sphere: {}", distance_from_center < hexasphere.hexasphere.radius as f32);
-            }
             
             // Calculate statistics
             let stats = hexasphere.hexasphere.calculate_hexagon_stats();
@@ -289,22 +274,6 @@ fn handle_tile_selection(
     }
 }
 
-/// Setup the camera with controls
-fn setup_camera(mut commands: Commands) {
-    let orbit_camera = OrbitCamera::default();
-    
-    // Initialize camera looking at origin, but after this it moves freely
-    let transform = Transform::from_translation(orbit_camera.position)
-        .looking_at(Vec3::ZERO, Vec3::Y);
-    
-    commands.spawn((
-        Camera3d::default(),
-        transform,
-        orbit_camera,
-    ));
-    
-    println!("📷 Camera initialized");
-}
 
 /// Component to mark the hovered tile info text
 #[derive(Component)]
@@ -320,6 +289,11 @@ struct SphereInfoText;
 
 /// Setup the UI with on-screen controls help and tile info displays
 fn setup_ui(mut commands: Commands) {
+    commands.spawn((
+        Transform::from_translation(Vec3::new(0.0, 15.0, 5.0)),
+        PanOrbitCamera::default(),
+    ));
+
     // Controls help in top-left
     commands.spawn((
         Text::new(

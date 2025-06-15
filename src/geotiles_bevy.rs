@@ -213,7 +213,6 @@ pub fn tile_hover_system(
     camera_query: Query<(&Camera, &GlobalTransform)>,
     window_query: Query<&Window>,
     tile_query: Query<(Entity, &TileComponent, &MeshMaterial3d<StandardMaterial>, &GlobalTransform)>,
-    sphere_rotation: Res<crate::camera::SphereRotation>,
 ) {
     if USE_UNIFORM_TILES {
         return;
@@ -238,7 +237,7 @@ pub fn tile_hover_system(
         );
         
         // Apply the current sphere rotation to get the actual world position
-        let rotated_center = sphere_rotation.rotation * original_center;
+        let rotated_center =  original_center;
         
         // Calculate closest point on ray to tile center
         let to_center = rotated_center - ray.origin;
@@ -304,7 +303,6 @@ pub fn tile_gizmos_system(
     mut gizmos: Gizmos,
     hexasphere_res: Res<HexasphereResource>,
     show_normals: Res<ShowNormals>,
-    sphere_rotation: Res<crate::camera::SphereRotation>,
 ) {
     if USE_UNIFORM_TILES {
         return;
@@ -318,13 +316,13 @@ pub fn tile_gizmos_system(
         );
         
         // Apply sphere rotation to get current world position
-        let rotated_center = sphere_rotation.rotation * original_center;
+        let rotated_center = original_center;
         
         let is_selected = hexasphere_res.selected_tile == Some(index);
         
         // Draw selection highlight as a wireframe outline with rotation applied
         if is_selected {
-            draw_thick_tile_border_rotated(&mut gizmos, thick_tile, Color::srgb(1.0, 1.0, 1.0), sphere_rotation.rotation);
+            draw_thick_tile_border_rotated(&mut gizmos, thick_tile, Color::srgb(1.0, 1.0, 1.0), Quat::IDENTITY);
         }
         
         // Draw normal vectors if enabled

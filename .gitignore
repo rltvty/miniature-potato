@@ -27,3 +27,5 @@ Cargo.lock
 data
 
 vendor
+
+.DS_Store
