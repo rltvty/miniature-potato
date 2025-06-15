@@ -40,21 +40,6 @@ pub fn setup_hexasphere_world(
     println!("Generated {} tiles", hexasphere.tiles.len());
     println!("Uniform hexagon radius: {:.3}", uniform_radius);
     
-    // Materials
-    let hexagon_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.3, 0.7, 0.3),
-        metallic: 0.2,
-        perceptual_roughness: 0.5,
-        ..default()
-    });
-    
-    let pentagon_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.8, 0.3, 0.8),
-        metallic: 0.2,
-        perceptual_roughness: 0.5,
-        ..default()
-    });
-    
     // Create pre-computed meshes
     let hexagon_mesh = meshes.add(create_regular_polygon_mesh(6, uniform_radius as f32));
     let pentagon_mesh = meshes.add(create_regular_polygon_mesh(5, uniform_radius as f32 * 0.9));
@@ -81,16 +66,28 @@ pub fn setup_hexasphere_world(
             scale: Vec3::ONE,
         };
         
-        // Choose mesh and material
-        let (mesh_handle, material_handle) = if is_pentagon {
-            (pentagon_mesh.clone(), pentagon_material.clone())
+        // Create individual material for each tile
+        let material = materials.add(StandardMaterial {
+            base_color: if is_pentagon {
+                Color::srgb(0.8, 0.3, 0.8) // Magenta for pentagons
+            } else {
+                Color::srgb(0.3, 0.7, 0.3) // Green for hexagons
+            },
+            metallic: 0.2,
+            perceptual_roughness: 0.5,
+            ..default()
+        });
+        
+        // Choose mesh
+        let mesh_handle = if is_pentagon {
+            pentagon_mesh.clone()
         } else {
-            (hexagon_mesh.clone(), hexagon_material.clone())
+            hexagon_mesh.clone()
         };
         
         let entity = commands.spawn((
             Mesh3d(mesh_handle),
-            MeshMaterial3d(material_handle),
+            MeshMaterial3d(material),
             transform,
             TileComponent { index, is_pentagon },
         )).id();
@@ -193,7 +190,6 @@ fn create_regular_polygon_mesh(sides: usize, radius: f32) -> Mesh {
 /// System to handle tile hover with materials
 pub fn tile_hover_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
-    hexasphere_res: Res<HexasphereResource>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     window_query: Query<&Window>,
     tile_query: Query<(&TileComponent, &GlobalTransform, &MeshMaterial3d<StandardMaterial>)>,
@@ -218,7 +214,7 @@ pub fn tile_hover_system(
             let closest_point = ray.origin + ray.direction * proj_length;
             let distance = (closest_point - tile_pos).length();
             
-            if distance < closest_distance && distance < hexasphere_res.uniform_radius as f32 {
+            if distance < closest_distance && distance < 1.0 {
                 closest_distance = distance;
                 closest_tile = Some(tile_component.index);
             }
