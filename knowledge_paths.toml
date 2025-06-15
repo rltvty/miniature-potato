@@ -1,0 +1,11 @@
+github = [
+"https://github.com/bevyengine/bevy/tree/v0.16.0/docs",
+"https://github.com/bevyengine/bevy/tree/v0.16.0/errors",
+"https://github.com/bevyengine/bevy/tree/v0.16.0/examples",
+"https://github.com/bevyengine/bevy-website/tree/main/content/learn",
+"https://github.com/bevyengine/bevy-website/tree/main/content/news",
+]
+
+
+# https://github.com/bevyengine/bevy/discussions
+# https://github.com/bevyengine/bevy/issues
