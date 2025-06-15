@@ -1,24 +1,32 @@
-//! Main entry point using geotiles crate
+//! A spherical world game with true Goldberg polyhedron tiling
 
 use bevy::prelude::*;
-use bevy::pbr::wireframe::{WireframePlugin, WireframeConfig};
+use bevy::pbr::wireframe::WireframePlugin;
 use miniature_potato::camera::{camera_controller, calculate_camera_transform, OrbitCamera};
-use miniature_potato::geotiles_bevy::{setup_hexasphere_world, tile_hover_system};
+use miniature_potato::ray_casting::{
+    HoveredTriangle, simple_tile_visualization, handle_tile_selection, print_hovered_tile_info
+};
+use miniature_potato::world::{setup_world, toggle_wireframe, toggle_borders, print_tile_info};
 
 fn main() {
-    println!("🚀 Starting miniature-potato with geotiles integration");
+    println!("🚀 Starting True Goldberg Polyhedron World with Pentagon-Centric Construction");
     
     App::new()
         .add_plugins((
             DefaultPlugins,
             WireframePlugin::default(),
         ))
-        .add_systems(Startup, (setup_hexasphere_world, setup_camera))
+        .init_resource::<HoveredTriangle>()
+        .add_systems(Startup, (setup_world, setup_camera))
         .add_systems(Update, (
             handle_escape_key,
             toggle_wireframe,
+            toggle_borders,
+            print_tile_info,
+            print_hovered_tile_info,
             camera_controller,
-            tile_hover_system,
+            simple_tile_visualization,
+            handle_tile_selection,
         ))
         .run();
 }
@@ -31,17 +39,6 @@ fn handle_escape_key(
     if keyboard_input.just_pressed(KeyCode::Escape) {
         println!("Escape key pressed - exiting application");
         exit.write(AppExit::Success);
-    }
-}
-
-/// System to toggle wireframe rendering
-fn toggle_wireframe(
-    mut wireframe_config: ResMut<WireframeConfig>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-) {
-    if keyboard.just_pressed(KeyCode::Space) {
-        wireframe_config.global = !wireframe_config.global;
-        println!("Wireframe mode: {}", if wireframe_config.global { "ON" } else { "OFF" });
     }
 }
 
@@ -61,6 +58,10 @@ fn setup_camera(mut commands: Commands) {
     println!("     • Mouse drag: Rotate camera");
     println!("     • Mouse wheel: Zoom in/out");
     println!("     • WASD: Pan camera");
+    println!("     • Left click: Select/deselect tile");
     println!("     • Space: Toggle wireframe");
+    println!("     • B: Toggle pentagon/hexagon borders");
+    println!("     • I: Print tile system info");
+    println!("     • H: Print hovered tile info");
     println!("     • Esc: Quit");
 }

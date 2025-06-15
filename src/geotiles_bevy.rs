@@ -11,6 +11,8 @@ pub struct HexasphereResource {
     pub hexasphere: Hexasphere,
     pub uniform_radius: f64,
     pub tile_entities: Vec<Entity>,
+    pub hovered_tile: Option<usize>,
+    pub selected_tile: Option<usize>,
 }
 
 /// Component to mark tile entities
@@ -40,10 +42,6 @@ pub fn setup_hexasphere_world(
     println!("Generated {} tiles", hexasphere.tiles.len());
     println!("Uniform hexagon radius: {:.3}", uniform_radius);
     
-    // Create pre-computed meshes
-    let hexagon_mesh = meshes.add(create_regular_polygon_mesh(6, uniform_radius as f32));
-    let pentagon_mesh = meshes.add(create_regular_polygon_mesh(5, uniform_radius as f32 * 0.9));
-    
     let mut tile_entities = Vec::new();
     
     // Spawn tiles
@@ -55,13 +53,18 @@ pub fn setup_hexasphere_world(
             continue;
         };
         
+        let center = Vec3::new(
+            tile.center_point.x as f32,
+            tile.center_point.y as f32,
+            tile.center_point.z as f32,
+        );
+        
+        // Calculate the outward normal (from sphere center to tile center)
+        let normal = center.normalize();
+        
         // Convert orientation to transform
         let transform = Transform {
-            translation: Vec3::new(
-                tile.center_point.x as f32,
-                tile.center_point.y as f32,
-                tile.center_point.z as f32,
-            ),
+            translation: center,
             rotation: orientation_to_quat(&orientation),
             scale: Vec3::ONE,
         };
@@ -75,15 +78,19 @@ pub fn setup_hexasphere_world(
             },
             metallic: 0.2,
             perceptual_roughness: 0.5,
+            cull_mode: Some(bevy::render::render_resource::Face::Back), // Enable back-face culling
             ..default()
         });
         
-        // Choose mesh
-        let mesh_handle = if is_pentagon {
-            pentagon_mesh.clone()
-        } else {
-            hexagon_mesh.clone()
+        // Create individual mesh with proper normal for each tile
+        let sides = if is_pentagon { 5 } else { 6 };
+        let radius = if is_pentagon { 
+            uniform_radius as f32 * 0.9 
+        } else { 
+            uniform_radius as f32 
         };
+        let mesh = create_regular_polygon_mesh_with_normal(sides, radius, normal);
+        let mesh_handle = meshes.add(mesh);
         
         let entity = commands.spawn((
             Mesh3d(mesh_handle),
@@ -102,7 +109,15 @@ pub fn setup_hexasphere_world(
         hexasphere,
         uniform_radius,
         tile_entities,
+        hovered_tile: None,
+        selected_tile: None,
     });
+    
+    // Insert border visibility resource
+    commands.insert_resource(BorderVisibility { show_borders: true });
+    
+    // Insert normal visibility resource
+    commands.insert_resource(ShowNormals { show_normals: false });
     
     // Add lighting
     commands.spawn((
@@ -116,7 +131,7 @@ pub fn setup_hexasphere_world(
 
     commands.insert_resource(AmbientLight {
         color: Color::srgb(0.9, 0.9, 1.0),
-        brightness: 0.3,
+        brightness: 0.1, // Reduced ambient light to improve contrast
         ..default()
     });
     
@@ -151,8 +166,8 @@ fn orientation_to_quat(orientation: &TileOrientation) -> Quat {
     Quat::from_mat3(&Mat3::from_cols(right, up, forward))
 }
 
-/// Create a regular polygon mesh (hexagon or pentagon)
-fn create_regular_polygon_mesh(sides: usize, radius: f32) -> Mesh {
+/// Create a regular polygon mesh (hexagon or pentagon) with proper outward normals
+fn create_regular_polygon_mesh_with_normal(sides: usize, radius: f32, normal: Vec3) -> Mesh {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList, 
         bevy::render::render_asset::RenderAssetUsages::all()
@@ -174,7 +189,8 @@ fn create_regular_polygon_mesh(sides: usize, radius: f32) -> Mesh {
     
     // Set mesh attributes
     let positions: Vec<[f32; 3]> = vertices.iter().map(|v| [v.x, v.y, v.z]).collect();
-    let normals: Vec<[f32; 3]> = vec![[0.0, 1.0, 0.0]; vertices.len()];
+    // All vertices get the same normal (pointing outward from sphere center)
+    let normals: Vec<[f32; 3]> = vec![[normal.x, normal.y, normal.z]; vertices.len()];
     let uvs: Vec<[f32; 2]> = vertices.iter()
         .map(|v| [(v.x / radius + 1.0) * 0.5, (v.z / radius + 1.0) * 0.5])
         .collect();
@@ -187,13 +203,18 @@ fn create_regular_polygon_mesh(sides: usize, radius: f32) -> Mesh {
     mesh
 }
 
+/// Create a regular polygon mesh (hexagon or pentagon) - legacy version
+fn create_regular_polygon_mesh(sides: usize, radius: f32) -> Mesh {
+    create_regular_polygon_mesh_with_normal(sides, radius, Vec3::Y)
+}
+
 /// System to handle tile hover with materials
 pub fn tile_hover_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut hexasphere_res: ResMut<HexasphereResource>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     window_query: Query<&Window>,
     tile_query: Query<(&TileComponent, &GlobalTransform, &MeshMaterial3d<StandardMaterial>)>,
-    mut hovered_tile: Local<Option<usize>>,
 ) {
     let Ok(window) = window_query.single() else { return };
     let Some(cursor_pos) = window.cursor_position() else { return };
@@ -222,9 +243,9 @@ pub fn tile_hover_system(
     }
     
     // Update hover state
-    if closest_tile != *hovered_tile {
+    if closest_tile != hexasphere_res.hovered_tile {
         // Reset previous tile color
-        if let Some(prev_index) = *hovered_tile {
+        if let Some(prev_index) = hexasphere_res.hovered_tile {
             for (tile_component, _, material_handle) in tile_query.iter() {
                 if tile_component.index == prev_index {
                     if let Some(material) = materials.get_mut(material_handle) {
@@ -258,6 +279,107 @@ pub fn tile_hover_system(
             }
         }
         
-        *hovered_tile = closest_tile;
+        hexasphere_res.hovered_tile = closest_tile;
+    }
+}
+
+/// System to draw gizmos for tile visualization
+pub fn tile_gizmos_system(
+    mut gizmos: Gizmos,
+    hexasphere_res: Res<HexasphereResource>,
+    show_borders: Res<BorderVisibility>,
+    show_normals: Res<ShowNormals>,
+) {
+    // Draw tile centers
+    for (index, tile) in hexasphere_res.hexasphere.tiles.iter().enumerate() {
+        let center = Vec3::new(
+            tile.center_point.x as f32,
+            tile.center_point.y as f32,
+            tile.center_point.z as f32,
+        );
+        
+        let is_pentagon = tile.boundary.len() == 5;
+        let is_hovered = hexasphere_res.hovered_tile == Some(index);
+        let is_selected = hexasphere_res.selected_tile == Some(index);
+        
+        // Choose color based on state
+        let color = if is_selected {
+            Color::srgb(1.0, 0.0, 0.0) // Red for selected
+        } else if is_hovered {
+            Color::srgb(1.0, 1.0, 0.0) // Yellow for hovered
+        } else if is_pentagon {
+            Color::srgb(0.8, 0.3, 0.8) // Magenta for pentagons
+        } else {
+            Color::srgb(0.3, 0.7, 0.3) // Green for hexagons
+        };
+        
+        // Draw center sphere
+        let radius = if is_pentagon { 0.05 } else { 0.03 };
+        gizmos.sphere(center, radius, color);
+        
+        // Draw borders if enabled
+        if show_borders.show_borders {
+            draw_tile_border(&mut gizmos, tile, color);
+        }
+        
+        // Draw selection highlight (larger sphere)
+        if is_selected {
+            let highlight_radius = if is_pentagon { 0.08 } else { 0.06 };
+            gizmos.sphere(center, highlight_radius, Color::srgb(1.0, 1.0, 1.0));
+        }
+        
+        // Draw normal vectors if enabled
+        if show_normals.show_normals {
+            let normal_end = center + center.normalize() * 0.2; // Normal pointing outward from sphere center
+            gizmos.line(center, normal_end, Color::srgb(0.0, 1.0, 1.0)); // Cyan for normals
+        }
+    }
+}
+
+/// Resource to control border visibility
+#[derive(Resource, Default)]
+pub struct BorderVisibility {
+    pub show_borders: bool,
+}
+
+/// Resource to control normal visualization
+#[derive(Resource, Default)]
+pub struct ShowNormals {
+    pub show_normals: bool,
+}
+
+/// Draw borders around a tile
+fn draw_tile_border(gizmos: &mut Gizmos, tile: &geotiles::Tile, color: Color) {
+    let boundary_points: Vec<Vec3> = tile.boundary.iter()
+        .map(|p| Vec3::new(p.x as f32, p.y as f32, p.z as f32))
+        .collect();
+    
+    // Draw lines between boundary points
+    for i in 0..boundary_points.len() {
+        let start = boundary_points[i];
+        let end = boundary_points[(i + 1) % boundary_points.len()];
+        gizmos.line(start, end, color);
+    }
+}
+
+/// System to toggle border visibility with 'B' key
+pub fn toggle_borders(
+    mut border_visibility: ResMut<BorderVisibility>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+) {
+    if keyboard.just_pressed(KeyCode::KeyB) {
+        border_visibility.show_borders = !border_visibility.show_borders;
+        println!("Border visibility: {}", if border_visibility.show_borders { "ON" } else { "OFF" });
+    }
+}
+
+/// System to toggle normal visibility with 'N' key
+pub fn toggle_normals(
+    mut show_normals: ResMut<ShowNormals>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+) {
+    if keyboard.just_pressed(KeyCode::KeyN) {
+        show_normals.show_normals = !show_normals.show_normals;
+        println!("Normal visibility: {}", if show_normals.show_normals { "ON" } else { "OFF" });
     }
 }

@@ -3,13 +3,6 @@ name = "miniature-potato"
 version = "0.1.0"
 edition = "2021"
 
-[[bin]]
-name = "miniature-potato"
-path = "src/main.rs"
-
-[[bin]]
-name = "miniature-potato-geotiles"
-path = "src/main_geotiles.rs"
 
 [dependencies]
 bevy = { version = "0.16.1", features = ["dynamic_linking"] }
