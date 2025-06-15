@@ -2,7 +2,8 @@
 
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
-use geotiles::{Hexasphere, ThickTile};
+use geotiles::tile::TileOrientation;
+use geotiles::{Hexasphere, Point, RegularHexagonParams, ThickTile, Vector3};
 use std::f32::consts::PI;
 
 // Configuration
@@ -10,7 +11,7 @@ const SPHERE_RADIUS: f64 = 5.0;
 const SUBDIVISIONS: usize = 10;
 const TILE_SIZE: f64 = 0.99;
 const TILE_THICKNESS: f64 = 0.1;
-const USE_UNIFORM_TILES: bool = false;
+const USE_UNIFORM_TILES: bool = true;
 
 /// Resource to store the hexasphere and related data
 #[derive(Resource)]
@@ -30,21 +31,28 @@ pub struct TileComponent {
     pub is_pentagon: bool,
 }
 
-fn transform_from_matrix(matrix: [f64; 16]) -> Transform {
-    // Row-major matrix to Bevy transform
-    let right = Vec3::new(matrix[0] as f32, matrix[4] as f32, matrix[8] as f32);
-    let up = Vec3::new(matrix[1] as f32, matrix[5] as f32, matrix[9] as f32);
-    let forward = Vec3::new(matrix[2] as f32, matrix[6] as f32, matrix[10] as f32);
-    let translation = Vec3::new(matrix[3] as f32, matrix[7] as f32, matrix[11] as f32);
+fn vec3_from_point(p: &Point) -> Vec3 {
+    Vec3::new(p.x as f32, p.y as f32, p.z as f32)
+}
 
-    // Construct rotation quaternion from 3x3 basis
-    let rotation = Quat::from_mat3(&Mat3::from_cols(right, up, forward));
+fn vec3_from_vector3(v: &Vector3) -> Vec3 {
+    Vec3::new(v.x as f32, v.y as f32, v.z as f32)
+}
 
-    Transform {
-        translation,
-        rotation,
-        scale: Vec3::ONE, // Assuming no scale is embedded
-    }
+fn transform_from_hexagon_params(hex_params: &RegularHexagonParams) -> Transform {
+    let translation = vec3_from_point(&hex_params.center);
+    let right = vec3_from_vector3(&hex_params.orientation.right).normalize();
+    let up = vec3_from_vector3(&hex_params.orientation.up).normalize();
+    let forward = vec3_from_vector3(&hex_params.orientation.forward).normalize();
+    
+    let matrix = Mat4::from_cols(
+        Vec4::new(forward.x, forward.y, forward.z, 0.0), 
+        Vec4::new(right.x, right.y, right.z, 0.0),  
+        Vec4::new(up.x, up.y, up.z, 0.0),
+        Vec4::new(translation.x, translation.y, translation.z, 1.0)
+    );
+    
+    Transform::from_matrix(matrix)
 }
 
 fn get_material(materials: &mut Assets<StandardMaterial>, is_hexagon: bool) -> Handle<StandardMaterial> {
@@ -102,10 +110,7 @@ pub fn setup_hexasphere_world(
         for (index, hex_params) in approximations.iter().enumerate() {
             let is_pentagon = false;
 
-            // Use in 3D engine
-            let transform_matrix = hex_params.orientation.to_transform_matrix(&hex_params.center);
-            let transform = transform_from_matrix(transform_matrix);
-            
+            let transform = transform_from_hexagon_params(&hex_params);            
             let material = get_material(&mut materials, true);
             let mesh = Extrusion::new(RegularPolygon::new(hex_params.radius as f32, 6), TILE_THICKNESS as f32);
             let tile_component = TileComponent { index, is_pentagon };
@@ -229,11 +234,6 @@ pub fn tile_hover_system(
                         material.base_color = Color::srgb(1.0, 1.0, 0.3);
                         material.emissive = LinearRgba::rgb(0.5, 0.5, 0.0);
                     }
-                    
-                    println!("Hovering {} tile {}", 
-                        if tile_component.is_pentagon { "pentagon" } else { "hexagon" },
-                        tile_index
-                    );
                     break;
                 }
             }
