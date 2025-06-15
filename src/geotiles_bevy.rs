@@ -33,8 +33,8 @@ pub fn setup_hexasphere_world(
     
     // Configuration
     const SPHERE_RADIUS: f64 = 5.0;
-    const SUBDIVISIONS: usize = 3;
-    const TILE_SIZE: f64 = 0.9;
+    const SUBDIVISIONS: usize = 10;
+    const TILE_SIZE: f64 = 0.99;
     
     // Create hexasphere and thick tiles
     let hexasphere = Hexasphere::new(SPHERE_RADIUS, SUBDIVISIONS, TILE_SIZE);

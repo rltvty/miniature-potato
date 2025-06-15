@@ -97,10 +97,10 @@ pub fn camera_controller(
         let move_speed = orbit_camera.move_sensitivity * time.delta_secs();
         
         if keyboard_input.pressed(KeyCode::KeyW) {
-            move_vector.z -= move_speed; // Forward
+            move_vector.y += move_speed; // Up
         }
         if keyboard_input.pressed(KeyCode::KeyS) {
-            move_vector.z += move_speed; // Backward
+            move_vector.y -= move_speed; // Down
         }
         if keyboard_input.pressed(KeyCode::KeyA) {
             move_vector.x -= move_speed; // Left
