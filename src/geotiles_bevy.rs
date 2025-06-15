@@ -176,33 +176,6 @@ pub fn setup_hexasphere_world(
     // Insert normal visibility resource
     commands.insert_resource(ShowNormals { show_normals: false });
     
-    // Add lighting - brighter setup for better visibility
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 20000.0, // Increased brightness
-            shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.5, -0.5, 0.0)),
-    ));
-
-    // Add additional directional light from another angle
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 10000.0,
-            shadows_enabled: false,
-            ..default()
-        },
-        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, 0.5, 0.5, 0.0)),
-    ));
-
-    commands.insert_resource(AmbientLight {
-        color: Color::srgb(1.0, 1.0, 1.0),
-        brightness: 0.3, // Increased ambient light for better visibility
-        ..default()
-    });
-    
-    
 }
 
 

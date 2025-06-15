@@ -43,59 +43,53 @@ fn main() {
                 }),
                 ..default()
             }),
-            WireframePlugin::default(),
-            PanOrbitCameraPlugin,
         ));
-    } else {
-        app.add_plugins((
-            DefaultPlugins,
-            WireframePlugin::default(),
-            PanOrbitCameraPlugin,
-        ));
-    }
-    
-    app
-        .add_systems(Startup, (setup_hexasphere_world, setup_ui));
-    
-    if screenshot_mode {
+
         app.insert_resource(ScreenshotTimer {
             timer: Timer::from_seconds(2.0, TimerMode::Once),
             should_screenshot: true,
             exit_timer: None,
         })
+
         .add_systems(Update, (
-            handle_escape_key,
-            toggle_wireframe,
-            toggle_borders,
-            toggle_normals,
-            print_tile_info,
-            handle_tile_selection,
-            tile_hover_system,
-            tile_gizmos_system,
-            update_hovered_tile_ui,
-            update_selected_tile_ui,
-            update_sphere_info_ui,
             screenshot_system,
         ));
     } else {
+        app.add_plugins((
+            DefaultPlugins,
+        ));
+
         app.insert_resource(WireframeConfig { 
             global: false, // Disable wireframe by default
             default_color: Color::WHITE,
-        })
-        .add_systems(Update, (
-            handle_escape_key,
-            toggle_wireframe,
-            toggle_borders,
-            toggle_normals,
-            print_tile_info,
-            handle_tile_selection,
-            tile_hover_system,
-            tile_gizmos_system,
-            update_hovered_tile_ui,
-            update_selected_tile_ui,
-            update_sphere_info_ui,
-        ));
+        });
     }
+
+    app.add_plugins((
+        WireframePlugin::default(),
+        PanOrbitCameraPlugin,
+    ));
+    
+    app.add_systems(Startup, (
+        setup_hexasphere_world, 
+        setup_ui,
+        setup_camera,
+        setup_lighting,
+    ));
+
+    app.add_systems(Update, (
+        handle_escape_key,
+        toggle_wireframe,
+        toggle_borders,
+        toggle_normals,
+        print_tile_info,
+        handle_tile_selection,
+        tile_hover_system,
+        tile_gizmos_system,
+        update_hovered_tile_ui,
+        update_selected_tile_ui,
+        update_sphere_info_ui,
+    ));
     
     app.run();
 }
@@ -287,25 +281,56 @@ struct SelectedTileText;
 #[derive(Component)]
 struct SphereInfoText;
 
-/// Setup the UI with on-screen controls help and tile info displays
-fn setup_ui(mut commands: Commands) {
+fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, 15.0, 5.0)),
         PanOrbitCamera::default(),
     ));
+}
 
+fn setup_lighting(mut commands: Commands) {
+    // Add lighting - brighter setup for better visibility
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 10000.0, // Increased brightness
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.5, -0.5, 0.0)),
+    ));
+
+    // Add additional directional light from another angle
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 10000.0,
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, 0.5, 0.5, 0.0)),
+    ));
+
+    // this light appears to do the highlighting
+    commands.insert_resource(AmbientLight {
+        color: Color::srgb(1.0, 1.0, 1.0),
+        brightness: 0.3, // Increased ambient light for better visibility
+        ..default()
+    });
+}
+
+/// Setup the UI with on-screen controls help and tile info displays
+fn setup_ui(mut commands: Commands) {
     // Controls help in top-left
     commands.spawn((
         Text::new(
             "Controls:\n\
-            • Right mouse drag: Rotate sphere\n\
-            • Mouse wheel: Zoom camera forward/back\n\
-            • WASD: Move camera up/down/left/right\n\
-            • Left click: Select/deselect tile\n\
-            • Space: Toggle wireframe mode\n\
-            • N: Toggle normal visualization\n\
-            • I: Print hexasphere info\n\
-            • Esc: Quit"
+            * Left mouse drag: Orbit camera\n\
+            * Right mouse drag: Pan camera\n\
+            * Mouse wheel: Zoom camera\n\
+            * Left click: Select/deselect tile\n\
+            * Space: Toggle wireframe mode\n\
+            * N: Toggle normal visualization\n\
+            * I: Print hexasphere info\n\
+            * Esc: Quit"
         ),
         TextFont {
             font_size: 16.0,
