@@ -2,10 +2,12 @@
 
 use bevy::prelude::*;
 use bevy::pbr::wireframe::{WireframePlugin, WireframeConfig};
+use bevy::dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin};
+use bevy::text::FontSmoothing;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use bevy::window::WindowPlugin;
 use std::env;
-use miniature_potato::camera::{camera_controller, rotate_sphere_system, OrbitCamera, SphereRotation};
+use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use miniature_potato::geotiles_bevy::{
     setup_hexasphere_world, tile_hover_system, tile_gizmos_system, toggle_borders, toggle_normals,
     HexasphereResource
@@ -18,6 +20,9 @@ struct ScreenshotTimer {
     should_screenshot: bool,
     exit_timer: Option<Timer>,
 }
+
+static TEXT_COLOR: Color = Color::srgb(0.9, 0.9, 0.9);
+const TEXT_SIZE: f32 = 15.0;
 
 fn main() {
     println!("🚀 Starting miniature-potato with geotiles geodesic polyhedron");
@@ -43,62 +48,71 @@ fn main() {
                 }),
                 ..default()
             }),
-            WireframePlugin::default(),
         ));
-    } else {
-        app.add_plugins((
-            DefaultPlugins,
-            WireframePlugin::default(),
-        ));
-    }
-    
-    app
-        .insert_resource(SphereRotation::new())
-        .add_systems(Startup, (setup_hexasphere_world, setup_camera, setup_ui));
-    
-    if screenshot_mode {
+
         app.insert_resource(ScreenshotTimer {
             timer: Timer::from_seconds(2.0, TimerMode::Once),
             should_screenshot: true,
             exit_timer: None,
         })
+
         .add_systems(Update, (
-            handle_escape_key,
-            toggle_wireframe,
-            toggle_borders,
-            toggle_normals,
-            print_tile_info,
-            handle_tile_selection,
-            camera_controller,
-            rotate_sphere_system,
-            tile_hover_system,
-            tile_gizmos_system,
-            update_hovered_tile_ui,
-            update_selected_tile_ui,
-            update_sphere_info_ui,
             screenshot_system,
         ));
     } else {
+        app.add_plugins((
+            DefaultPlugins,
+        ));
+
         app.insert_resource(WireframeConfig { 
             global: false, // Disable wireframe by default
             default_color: Color::WHITE,
-        })
-        .add_systems(Update, (
-            handle_escape_key,
-            toggle_wireframe,
-            toggle_borders,
-            toggle_normals,
-            print_tile_info,
-            handle_tile_selection,
-            camera_controller,
-            rotate_sphere_system,
-            tile_hover_system,
-            tile_gizmos_system,
-            update_hovered_tile_ui,
-            update_selected_tile_ui,
-            update_sphere_info_ui,
-        ));
+        });
     }
+
+    app.add_plugins((
+        WireframePlugin::default(),
+        PanOrbitCameraPlugin,
+        FpsOverlayPlugin {
+            config: FpsOverlayConfig {
+                text_config: TextFont {
+                    // Here we define size of our overlay
+                    font_size: TEXT_SIZE,
+                    // If we want, we can use a custom font
+                    font: default(),
+                    // We could also disable font smoothing,
+                    font_smoothing: FontSmoothing::default(),
+                    ..default()
+                },
+                // We can also change color of the overlay
+                text_color: TEXT_COLOR,
+                // We can also set the refresh interval for the FPS counter
+                refresh_interval: core::time::Duration::from_millis(100),
+                enabled: true,
+            },
+        },
+    ));
+    
+    app.add_systems(Startup, (
+        setup_hexasphere_world, 
+        setup_ui,
+        setup_camera,
+        setup_lighting,
+    ));
+
+    app.add_systems(Update, (
+        handle_escape_key,
+        toggle_wireframe,
+        toggle_borders,
+        toggle_normals,
+        print_tile_info,
+        handle_tile_selection,
+        tile_hover_system,
+        tile_gizmos_system,
+        update_hovered_tile_ui,
+        update_selected_tile_ui,
+        update_sphere_info_ui,
+    ));
     
     app.run();
 }
@@ -129,7 +143,6 @@ fn toggle_wireframe(
 fn print_tile_info(
     keyboard: Res<ButtonInput<KeyCode>>,
     hexasphere_res: Option<Res<HexasphereResource>>,
-    camera_query: Query<&Transform, With<OrbitCamera>>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyI) {
         if let Some(hexasphere) = hexasphere_res {
@@ -148,17 +161,6 @@ fn print_tile_info(
             println!("Sphere radius: {}", hexasphere.hexasphere.radius);
             println!("Uniform hexagon radius: {:.3}", hexasphere.uniform_radius);
             
-            // Check camera position relative to sphere
-            if let Ok(camera_transform) = camera_query.single() {
-                let distance_from_center = camera_transform.translation.length();
-                println!("\n📷 Camera Info:");
-                println!("Position: ({:.2}, {:.2}, {:.2})", 
-                    camera_transform.translation.x,
-                    camera_transform.translation.y, 
-                    camera_transform.translation.z);
-                println!("Distance from center: {:.2}", distance_from_center);
-                println!("Inside sphere: {}", distance_from_center < hexasphere.hexasphere.radius as f32);
-            }
             
             // Calculate statistics
             let stats = hexasphere.hexasphere.calculate_hexagon_stats();
@@ -189,22 +191,21 @@ fn update_hovered_tile_ui(
                     let lat_lon = tile.get_lat_lon(hexasphere.hexasphere.radius);
                     
                     **text = format!(
-                        "Hovered: {} #{}\nType: {}\nCenter: ({:.2}, {:.2}, {:.2})\nLat/Lon: {:.1}°, {:.1}°\nNeighbors: {}",
-                        tile_type,
-                        hovered_index,
+                        "Type: {}\nCenter: ({:.2}, {:.2}, {:.2})\nLat/Lon: {:.1}°, {:.1}°\nNeighbors: {}\nHovered: {}",
                         tile_type,
                         center.x, center.y, center.z,
                         lat_lon.lat, lat_lon.lon,
-                        tile.neighbors.len()
+                        tile.neighbors.len(),
+                        hovered_index,
                     );
                 } else {
-                    **text = "Hovered: Invalid tile".to_string();
+                    **text = "Type:\nCenter:\nLat/Lon:\nNeighbors:\nHovered: Invalid tile".to_string();
                 }
             } else {
-                **text = "Hovered: None".to_string();
+                **text = "Type:\nCenter:\nLat/Lon:\nNeighbors:\nHovered: None".to_string();
             }
         } else {
-            **text = "Hovered: Loading...".to_string();
+            **text = "Type:\nCenter:\nLat/Lon:\nNeighbors:\nHovered: Loading...".to_string();
         }
     }
 }
@@ -289,22 +290,6 @@ fn handle_tile_selection(
     }
 }
 
-/// Setup the camera with controls
-fn setup_camera(mut commands: Commands) {
-    let orbit_camera = OrbitCamera::default();
-    
-    // Initialize camera looking at origin, but after this it moves freely
-    let transform = Transform::from_translation(orbit_camera.position)
-        .looking_at(Vec3::ZERO, Vec3::Y);
-    
-    commands.spawn((
-        Camera3d::default(),
-        transform,
-        orbit_camera,
-    ));
-    
-    println!("📷 Camera initialized");
-}
 
 /// Component to mark the hovered tile info text
 #[derive(Component)]
@@ -318,29 +303,65 @@ struct SelectedTileText;
 #[derive(Component)]
 struct SphereInfoText;
 
+fn setup_camera(mut commands: Commands) {
+    commands.spawn((
+        Transform::from_translation(Vec3::new(0.0, 15.0, 5.0)),
+        PanOrbitCamera::default(),
+    ));
+}
+
+fn setup_lighting(mut commands: Commands) {
+    // Add lighting - brighter setup for better visibility
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 10000.0, // Increased brightness
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.5, -0.5, 0.0)),
+    ));
+
+    // Add additional directional light from another angle
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 10000.0,
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, 0.5, 0.5, 0.0)),
+    ));
+
+    // this light appears to do the highlighting
+    commands.insert_resource(AmbientLight {
+        color: Color::srgb(1.0, 1.0, 1.0),
+        brightness: 0.3, // Increased ambient light for better visibility
+        ..default()
+    });
+}
+
 /// Setup the UI with on-screen controls help and tile info displays
 fn setup_ui(mut commands: Commands) {
     // Controls help in top-left
     commands.spawn((
         Text::new(
             "Controls:\n\
-            • Right mouse drag: Rotate sphere\n\
-            • Mouse wheel: Zoom camera forward/back\n\
-            • WASD: Move camera up/down/left/right\n\
-            • Left click: Select/deselect tile\n\
-            • Space: Toggle wireframe mode\n\
-            • N: Toggle normal visualization\n\
-            • I: Print hexasphere info\n\
-            • Esc: Quit"
+            * Left mouse drag: Orbit camera\n\
+            * Right mouse drag: Pan camera\n\
+            * Mouse wheel: Zoom camera\n\
+            * Left click: Select/deselect tile\n\
+            * Space: Toggle wireframe mode\n\
+            * N: Toggle normal visualization\n\
+            * I: Print hexasphere info\n\
+            * Esc: Quit"
         ),
         TextFont {
-            font_size: 16.0,
+            font_size: TEXT_SIZE,
             ..default()
         },
-        TextColor(Color::srgb(0.9, 0.9, 0.9)),
+        TextColor(TEXT_COLOR),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(12.0),
+            top: Val::Px(24.0),
             left: Val::Px(12.0),
             ..default()
         },
@@ -350,10 +371,10 @@ fn setup_ui(mut commands: Commands) {
     commands.spawn((
         Text::new("Sphere Info:\nLoading..."),
         TextFont {
-            font_size: 14.0,
+            font_size: TEXT_SIZE,
             ..default()
         },
-        TextColor(Color::srgb(0.7, 0.9, 1.0)), // Light blue color for sphere info
+        TextColor(TEXT_COLOR),
         Node {
             position_type: PositionType::Absolute,
             top: Val::Px(12.0),
@@ -367,10 +388,10 @@ fn setup_ui(mut commands: Commands) {
     commands.spawn((
         Text::new("Hovered: None"),
         TextFont {
-            font_size: 16.0,
+            font_size: TEXT_SIZE,
             ..default()
         },
-        TextColor(Color::srgb(0.9, 0.9, 0.9)),
+        TextColor(TEXT_COLOR),
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(12.0),
@@ -384,10 +405,10 @@ fn setup_ui(mut commands: Commands) {
     commands.spawn((
         Text::new("Selected: None"),
         TextFont {
-            font_size: 18.0,
+            font_size: TEXT_SIZE,
             ..default()
         },
-        TextColor(Color::srgb(1.0, 1.0, 0.3)), // Yellow color for selected
+        TextColor(TEXT_COLOR),
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(12.0),
