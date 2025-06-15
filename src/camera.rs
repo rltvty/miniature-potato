@@ -26,7 +26,7 @@ pub struct OrbitCamera {
 impl Default for OrbitCamera {
     fn default() -> Self {
         Self {
-            distance: 6.0,
+            distance: 15.0, // Zoom out much further to see the full structure
             yaw: 0.0,
             pitch: 0.3, // Start slightly above the sphere
             target: Vec3::ZERO,

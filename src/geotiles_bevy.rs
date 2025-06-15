@@ -2,13 +2,14 @@
 
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
-use geotiles::{Hexasphere, tile::TileOrientation};
+use geotiles::{Hexasphere, ThickTile, tile::TileOrientation};
 use std::f32::consts::PI;
 
 /// Resource to store the hexasphere and related data
 #[derive(Resource)]
 pub struct HexasphereResource {
     pub hexasphere: Hexasphere,
+    pub thick_tiles: Vec<ThickTile>,
     pub uniform_radius: f64,
     pub tile_entities: Vec<Entity>,
     pub hovered_tile: Option<usize>,
@@ -35,61 +36,39 @@ pub fn setup_hexasphere_world(
     const SUBDIVISIONS: usize = 3;
     const TILE_SIZE: f64 = 0.9;
     
-    // Create hexasphere
+    // Create hexasphere and thick tiles
     let hexasphere = Hexasphere::new(SPHERE_RADIUS, SUBDIVISIONS, TILE_SIZE);
     let uniform_radius = hexasphere.get_uniform_hexagon_radius();
+    let thick_tiles = hexasphere.create_thick_tiles(0.2); // 0.2 units thickness
     
     println!("Generated {} tiles", hexasphere.tiles.len());
+    println!("Generated {} thick tiles", thick_tiles.len());
     println!("Uniform hexagon radius: {:.3}", uniform_radius);
     
     let mut tile_entities = Vec::new();
     
-    // Spawn tiles
-    for (index, tile) in hexasphere.tiles.iter().enumerate() {
-        let is_pentagon = tile.boundary.len() == 5;
+    // Spawn thick tiles
+    for (index, thick_tile) in thick_tiles.iter().enumerate() {
+        let is_pentagon = !thick_tile.is_hexagon;
         
-        // Skip if we can't get orientation
-        let Some(orientation) = tile.get_orientation() else {
-            continue;
-        };
+        // Don't apply additional transform - thick tile vertices are already in world coordinates
+        let transform = Transform::IDENTITY;
         
-        let center = Vec3::new(
-            tile.center_point.x as f32,
-            tile.center_point.y as f32,
-            tile.center_point.z as f32,
-        );
-        
-        // Calculate the outward normal (from sphere center to tile center)
-        let normal = center.normalize();
-        
-        // Convert orientation to transform
-        let transform = Transform {
-            translation: center,
-            rotation: orientation_to_quat(&orientation),
-            scale: Vec3::ONE,
-        };
-        
-        // Create individual material for each tile
+        // Create individual material for each tile with brighter colors
         let material = materials.add(StandardMaterial {
             base_color: if is_pentagon {
-                Color::srgb(0.8, 0.3, 0.8) // Magenta for pentagons
+                Color::srgb(1.0, 0.4, 1.0) // Brighter magenta for pentagons
             } else {
-                Color::srgb(0.3, 0.7, 0.3) // Green for hexagons
+                Color::srgb(0.4, 1.0, 0.4) // Brighter green for hexagons
             },
-            metallic: 0.2,
-            perceptual_roughness: 0.5,
+            metallic: 0.1, // Less metallic for brighter appearance
+            perceptual_roughness: 0.8, // More rough for better light scattering
             cull_mode: Some(bevy::render::render_resource::Face::Back), // Enable back-face culling
             ..default()
         });
         
-        // Create individual mesh with proper normal for each tile
-        let sides = if is_pentagon { 5 } else { 6 };
-        let radius = if is_pentagon { 
-            uniform_radius as f32 * 0.9 
-        } else { 
-            uniform_radius as f32 
-        };
-        let mesh = create_regular_polygon_mesh_with_normal(sides, radius, normal);
+        // Create mesh from thick tile vertices
+        let mesh = create_thick_tile_mesh(thick_tile);
         let mesh_handle = meshes.add(mesh);
         
         let entity = commands.spawn((
@@ -107,31 +86,42 @@ pub fn setup_hexasphere_world(
     // Store the hexasphere resource
     commands.insert_resource(HexasphereResource {
         hexasphere,
+        thick_tiles,
         uniform_radius,
         tile_entities,
         hovered_tile: None,
         selected_tile: None,
     });
     
-    // Insert border visibility resource
+    // Insert border visibility resource - turn on borders to see tile colors better
     commands.insert_resource(BorderVisibility { show_borders: true });
     
     // Insert normal visibility resource
     commands.insert_resource(ShowNormals { show_normals: false });
     
-    // Add lighting
+    // Add lighting - brighter setup for better visibility
     commands.spawn((
         DirectionalLight {
-            illuminance: 10000.0,
+            illuminance: 20000.0, // Increased brightness
             shadows_enabled: true,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.5, -0.5, 0.0)),
     ));
 
+    // Add additional directional light from another angle
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 10000.0,
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, 0.5, 0.5, 0.0)),
+    ));
+
     commands.insert_resource(AmbientLight {
-        color: Color::srgb(0.9, 0.9, 1.0),
-        brightness: 0.1, // Reduced ambient light to improve contrast
+        color: Color::srgb(1.0, 1.0, 1.0),
+        brightness: 0.3, // Increased ambient light for better visibility
         ..default()
     });
     
@@ -290,15 +280,15 @@ pub fn tile_gizmos_system(
     show_borders: Res<BorderVisibility>,
     show_normals: Res<ShowNormals>,
 ) {
-    // Draw tile centers
-    for (index, tile) in hexasphere_res.hexasphere.tiles.iter().enumerate() {
+    // Draw tile centers using thick tiles
+    for (index, thick_tile) in hexasphere_res.thick_tiles.iter().enumerate() {
         let center = Vec3::new(
-            tile.center_point.x as f32,
-            tile.center_point.y as f32,
-            tile.center_point.z as f32,
+            thick_tile.center_point.x as f32,
+            thick_tile.center_point.y as f32,
+            thick_tile.center_point.z as f32,
         );
         
-        let is_pentagon = tile.boundary.len() == 5;
+        let is_pentagon = !thick_tile.is_hexagon;
         let is_hovered = hexasphere_res.hovered_tile == Some(index);
         let is_selected = hexasphere_res.selected_tile == Some(index);
         
@@ -319,7 +309,7 @@ pub fn tile_gizmos_system(
         
         // Draw borders if enabled
         if show_borders.show_borders {
-            draw_tile_border(&mut gizmos, tile, color);
+            draw_thick_tile_border(&mut gizmos, thick_tile, color);
         }
         
         // Draw selection highlight (larger sphere)
@@ -348,9 +338,9 @@ pub struct ShowNormals {
     pub show_normals: bool,
 }
 
-/// Draw borders around a tile
-fn draw_tile_border(gizmos: &mut Gizmos, tile: &geotiles::Tile, color: Color) {
-    let boundary_points: Vec<Vec3> = tile.boundary.iter()
+/// Draw borders around a thick tile
+fn draw_thick_tile_border(gizmos: &mut Gizmos, thick_tile: &ThickTile, color: Color) {
+    let boundary_points: Vec<Vec3> = thick_tile.outer_boundary.iter()
         .map(|p| Vec3::new(p.x as f32, p.y as f32, p.z as f32))
         .collect();
     
@@ -382,4 +372,109 @@ pub fn toggle_normals(
         show_normals.show_normals = !show_normals.show_normals;
         println!("Normal visibility: {}", if show_normals.show_normals { "ON" } else { "OFF" });
     }
+}
+
+/// Create a Bevy mesh from a ThickTile - creates a proper flat extruded tile
+fn create_thick_tile_mesh(thick_tile: &ThickTile) -> Mesh {
+    let mut vertices = Vec::new();
+    let mut normals = Vec::new();
+    let mut indices = Vec::new();
+    
+    // Create flat tile by triangulating the outer boundary (no center point)
+    let outer_boundary: Vec<Vec3> = thick_tile.outer_boundary.iter()
+        .map(|p| Vec3::new(p.x as f32, p.y as f32, p.z as f32))
+        .collect();
+    
+    let inner_boundary: Vec<Vec3> = thick_tile.inner_boundary.iter()
+        .map(|p| Vec3::new(p.x as f32, p.y as f32, p.z as f32))
+        .collect();
+    
+    let boundary_len = outer_boundary.len();
+    
+    // Calculate surface normal (pointing outward from sphere center)
+    let center = Vec3::new(
+        thick_tile.center_point.x as f32,
+        thick_tile.center_point.y as f32,
+        thick_tile.center_point.z as f32,
+    );
+    let outward_normal = center.normalize();
+    let inward_normal = -outward_normal;
+    
+    // Add outer boundary vertices with outward normals
+    for vertex in &outer_boundary {
+        vertices.push([vertex.x, vertex.y, vertex.z]);
+        normals.push([outward_normal.x, outward_normal.y, outward_normal.z]);
+    }
+    
+    // Add inner boundary vertices with inward normals
+    for vertex in &inner_boundary {
+        vertices.push([vertex.x, vertex.y, vertex.z]);
+        normals.push([inward_normal.x, inward_normal.y, inward_normal.z]);
+    }
+    
+    // Create outer face triangles (flat triangulation)
+    for i in 1..boundary_len - 1 {
+        indices.extend_from_slice(&[0, i as u32, (i + 1) as u32]);
+    }
+    
+    // Create inner face triangles (reverse winding for inward normal)
+    for i in 1..boundary_len - 1 {
+        let base_idx = boundary_len as u32;
+        indices.extend_from_slice(&[
+            base_idx, 
+            base_idx + (i + 1) as u32, 
+            base_idx + i as u32
+        ]);
+    }
+    
+    // Add vertices for side walls with proper normals
+    let side_vertex_start = vertices.len();
+    for i in 0..boundary_len {
+        let next_i = (i + 1) % boundary_len;
+        
+        // Calculate edge normal for side wall
+        let edge = outer_boundary[next_i] - outer_boundary[i];
+        let side_normal = outward_normal.cross(edge).normalize();
+        
+        // Add vertices for this side wall (4 vertices per wall)
+        vertices.push([outer_boundary[i].x, outer_boundary[i].y, outer_boundary[i].z]);
+        normals.push([side_normal.x, side_normal.y, side_normal.z]);
+        
+        vertices.push([inner_boundary[i].x, inner_boundary[i].y, inner_boundary[i].z]);
+        normals.push([side_normal.x, side_normal.y, side_normal.z]);
+        
+        vertices.push([outer_boundary[next_i].x, outer_boundary[next_i].y, outer_boundary[next_i].z]);
+        normals.push([side_normal.x, side_normal.y, side_normal.z]);
+        
+        vertices.push([inner_boundary[next_i].x, inner_boundary[next_i].y, inner_boundary[next_i].z]);
+        normals.push([side_normal.x, side_normal.y, side_normal.z]);
+        
+        // Create two triangles for this side wall
+        let base = (side_vertex_start + i * 4) as u32;
+        indices.extend_from_slice(&[base, base + 1, base + 2]);
+        indices.extend_from_slice(&[base + 2, base + 1, base + 3]);
+    }
+    
+    // Generate UV coordinates
+    let uvs: Vec<[f32; 2]> = vertices.iter()
+        .map(|pos| {
+            let normalized = Vec3::from(*pos).normalize();
+            let u = 0.5 + normalized.z.atan2(normalized.x) / (2.0 * PI);
+            let v = 0.5 - normalized.y.asin() / PI;
+            [u, v]
+        })
+        .collect();
+    
+    // Create and populate the mesh
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        bevy::render::render_asset::RenderAssetUsages::all(),
+    );
+    
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    
+    mesh
 }

@@ -60,6 +60,10 @@ fn main() {
             should_screenshot: true,
             exit_timer: None,
         })
+        .insert_resource(WireframeConfig { 
+            global: false, // Disable wireframe to see colored tiles
+            default_color: Color::WHITE,
+        })
         .add_systems(Update, (
             handle_escape_key,
             toggle_wireframe,
