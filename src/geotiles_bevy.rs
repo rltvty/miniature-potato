@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
-use geotiles::{Hexasphere, ThickTile, tile::TileOrientation};
+use geotiles::{Hexasphere, ThickTile};
 use std::f32::consts::PI;
 
 /// Resource to store the hexasphere and related data
@@ -128,75 +128,6 @@ pub fn setup_hexasphere_world(
     println!("✅ Hexasphere world setup complete with {} tiles!", tile_count);
 }
 
-/// Convert TileOrientation to Bevy quaternion
-fn orientation_to_quat(orientation: &TileOrientation) -> Quat {
-    // The TileOrientation provides a local coordinate system
-    // We need to convert this to a quaternion for Bevy
-    
-    // Get the vectors from the orientation
-    let right = Vec3::new(
-        orientation.right.x as f32,
-        orientation.right.y as f32,
-        orientation.right.z as f32,
-    );
-    
-    let up = Vec3::new(
-        orientation.up.x as f32,
-        orientation.up.y as f32,
-        orientation.up.z as f32,
-    );
-    
-    let forward = Vec3::new(
-        orientation.forward.x as f32,
-        orientation.forward.y as f32,
-        orientation.forward.z as f32,
-    );
-    
-    // Create rotation matrix and convert to quaternion
-    Quat::from_mat3(&Mat3::from_cols(right, up, forward))
-}
-
-/// Create a regular polygon mesh (hexagon or pentagon) with proper outward normals
-fn create_regular_polygon_mesh_with_normal(sides: usize, radius: f32, normal: Vec3) -> Mesh {
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList, 
-        bevy::render::render_asset::RenderAssetUsages::all()
-    );
-    
-    // Generate vertices
-    let mut vertices = vec![Vec3::ZERO]; // Center vertex
-    for i in 0..sides {
-        let angle = (i as f32) * 2.0 * PI / (sides as f32);
-        vertices.push(Vec3::new(angle.cos() * radius, 0.0, angle.sin() * radius));
-    }
-    
-    // Generate indices
-    let mut indices = Vec::new();
-    for i in 0..sides {
-        let next = (i + 1) % sides;
-        indices.extend_from_slice(&[0, i as u32 + 1, next as u32 + 1]);
-    }
-    
-    // Set mesh attributes
-    let positions: Vec<[f32; 3]> = vertices.iter().map(|v| [v.x, v.y, v.z]).collect();
-    // All vertices get the same normal (pointing outward from sphere center)
-    let normals: Vec<[f32; 3]> = vec![[normal.x, normal.y, normal.z]; vertices.len()];
-    let uvs: Vec<[f32; 2]> = vertices.iter()
-        .map(|v| [(v.x / radius + 1.0) * 0.5, (v.z / radius + 1.0) * 0.5])
-        .collect();
-    
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_indices(Indices::U32(indices));
-    
-    mesh
-}
-
-/// Create a regular polygon mesh (hexagon or pentagon) - legacy version
-fn create_regular_polygon_mesh(sides: usize, radius: f32) -> Mesh {
-    create_regular_polygon_mesh_with_normal(sides, radius, Vec3::Y)
-}
 
 /// System to handle tile hover with materials using improved distance-based detection
 pub fn tile_hover_system(
@@ -333,19 +264,6 @@ pub struct ShowNormals {
     pub show_normals: bool,
 }
 
-/// Draw borders around a thick tile
-fn draw_thick_tile_border(gizmos: &mut Gizmos, thick_tile: &ThickTile, color: Color) {
-    let boundary_points: Vec<Vec3> = thick_tile.outer_boundary.iter()
-        .map(|p| Vec3::new(p.x as f32, p.y as f32, p.z as f32))
-        .collect();
-    
-    // Draw lines between boundary points
-    for i in 0..boundary_points.len() {
-        let start = boundary_points[i];
-        let end = boundary_points[(i + 1) % boundary_points.len()];
-        gizmos.line(start, end, color);
-    }
-}
 
 /// Draw borders around a thick tile with rotation applied
 fn draw_thick_tile_border_rotated(gizmos: &mut Gizmos, thick_tile: &ThickTile, color: Color, rotation: Quat) {

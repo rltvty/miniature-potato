@@ -54,7 +54,7 @@ fn main() {
     
     app
         .insert_resource(SphereRotation::new())
-        .add_systems(Startup, (setup_hexasphere_world, setup_camera));
+        .add_systems(Startup, (setup_hexasphere_world, setup_camera, setup_ui));
     
     if screenshot_mode {
         app.insert_resource(ScreenshotTimer {
@@ -68,12 +68,14 @@ fn main() {
             toggle_borders,
             toggle_normals,
             print_tile_info,
-            print_hovered_tile_info,
             handle_tile_selection,
             camera_controller,
             rotate_sphere_system,
             tile_hover_system,
             tile_gizmos_system,
+            update_hovered_tile_ui,
+            update_selected_tile_ui,
+            update_sphere_info_ui,
             screenshot_system,
         ));
     } else {
@@ -87,12 +89,14 @@ fn main() {
             toggle_borders,
             toggle_normals,
             print_tile_info,
-            print_hovered_tile_info,
             handle_tile_selection,
             camera_controller,
             rotate_sphere_system,
             tile_hover_system,
             tile_gizmos_system,
+            update_hovered_tile_ui,
+            update_selected_tile_ui,
+            update_sphere_info_ui,
         ));
     }
     
@@ -171,34 +175,90 @@ fn print_tile_info(
     }
 }
 
-/// System to print information about the currently hovered tile
-fn print_hovered_tile_info(
-    keyboard: Res<ButtonInput<KeyCode>>,
+/// System to update the hovered tile UI text
+fn update_hovered_tile_ui(
     hexasphere_res: Option<Res<HexasphereResource>>,
+    mut hovered_text_query: Query<&mut Text, With<HoveredTileText>>,
 ) {
-    if keyboard.just_pressed(KeyCode::KeyH) {
+    if let Ok(mut text) = hovered_text_query.single_mut() {
         if let Some(hexasphere) = hexasphere_res {
             if let Some(hovered_index) = hexasphere.hovered_tile {
                 if let Some(tile) = hexasphere.hexasphere.tiles.get(hovered_index) {
-                    println!("\n🔍 === HOVERED TILE INFO ===");
-                    println!("Tile index: {}", hovered_index);
-                    println!("Type: {}", if tile.boundary.len() == 5 { "Pentagon" } else { "Hexagon" });
-                    println!("Boundary vertices: {}", tile.boundary.len());
-                    println!("Neighbors: {}", tile.neighbors.len());
-                    
+                    let tile_type = if tile.boundary.len() == 5 { "Pentagon" } else { "Hexagon" };
                     let center = &tile.center_point;
-                    println!("Center: ({:.3}, {:.3}, {:.3})", center.x, center.y, center.z);
-                    
-                    // Calculate lat/lon
                     let lat_lon = tile.get_lat_lon(hexasphere.hexasphere.radius);
-                    println!("Lat/Lon: {:.1}°, {:.1}°", lat_lon.lat, lat_lon.lon);
                     
-                    // Print neighbor information
-                    println!("Neighbor tiles: {:?}", tile.neighbors);
+                    **text = format!(
+                        "Hovered: {} #{}\nType: {}\nCenter: ({:.2}, {:.2}, {:.2})\nLat/Lon: {:.1}°, {:.1}°\nNeighbors: {}",
+                        tile_type,
+                        hovered_index,
+                        tile_type,
+                        center.x, center.y, center.z,
+                        lat_lon.lat, lat_lon.lon,
+                        tile.neighbors.len()
+                    );
+                } else {
+                    **text = "Hovered: Invalid tile".to_string();
                 }
             } else {
-                println!("No tile currently hovered");
+                **text = "Hovered: None".to_string();
             }
+        } else {
+            **text = "Hovered: Loading...".to_string();
+        }
+    }
+}
+
+/// System to update the selected tile UI text
+fn update_selected_tile_ui(
+    hexasphere_res: Option<Res<HexasphereResource>>,
+    mut selected_text_query: Query<&mut Text, With<SelectedTileText>>,
+) {
+    if let Ok(mut text) = selected_text_query.single_mut() {
+        if let Some(hexasphere) = hexasphere_res {
+            if let Some(selected_index) = hexasphere.selected_tile {
+                if let Some(tile) = hexasphere.hexasphere.tiles.get(selected_index) {
+                    let tile_type = if tile.boundary.len() == 5 { "Pentagon" } else { "Hexagon" };
+                    **text = format!("Selected: {} #{}", tile_type, selected_index);
+                } else {
+                    **text = "Selected: Invalid tile".to_string();
+                }
+            } else {
+                **text = "Selected: None".to_string();
+            }
+        } else {
+            **text = "Selected: Loading...".to_string();
+        }
+    }
+}
+
+/// System to update the sphere info UI text
+fn update_sphere_info_ui(
+    hexasphere_res: Option<Res<HexasphereResource>>,
+    mut sphere_info_query: Query<&mut Text, With<SphereInfoText>>,
+) {
+    if let Ok(mut text) = sphere_info_query.single_mut() {
+        if let Some(hexasphere) = hexasphere_res {
+            let pentagon_count = hexasphere.hexasphere.tiles.iter()
+                .filter(|t| t.boundary.len() == 5)
+                .count();
+            let hexagon_count = hexasphere.hexasphere.tiles.iter()
+                .filter(|t| t.boundary.len() == 6)
+                .count();
+            
+            let stats = hexasphere.hexasphere.calculate_hexagon_stats();
+            
+            **text = format!(
+                "Sphere Info:\nTotal tiles: {}\nPentagons: {}\nHexagons: {}\nRadius: {:.1}\nAvg hex radius: {:.3}\nSize variation: {:.1}%",
+                hexasphere.hexasphere.tiles.len(),
+                pentagon_count,
+                hexagon_count,
+                hexasphere.hexasphere.radius,
+                stats.average_hexagon_radius,
+                100.0 * (stats.max_hexagon_radius - stats.min_hexagon_radius) / stats.average_hexagon_radius
+            );
+        } else {
+            **text = "Sphere Info:\nLoading...".to_string();
         }
     }
 }
@@ -244,16 +304,99 @@ fn setup_camera(mut commands: Commands) {
     ));
     
     println!("📷 Camera initialized");
-    println!("   Controls:");
-    println!("     • Right mouse drag: Rotate sphere");
-    println!("     • Mouse wheel: Zoom camera forward/back");
-    println!("     • WASD: Move camera up/down/left/right");
-    println!("     • Left click: Select/deselect tile");
-    println!("     • Space: Toggle wireframe mode");
-    println!("     • N: Toggle normal visualization");
-    println!("     • I: Print hexasphere info");
-    println!("     • H: Print hovered tile info");
-    println!("     • Esc: Quit");
+}
+
+/// Component to mark the hovered tile info text
+#[derive(Component)]
+struct HoveredTileText;
+
+/// Component to mark the selected tile info text
+#[derive(Component)]
+struct SelectedTileText;
+
+/// Component to mark the sphere info text
+#[derive(Component)]
+struct SphereInfoText;
+
+/// Setup the UI with on-screen controls help and tile info displays
+fn setup_ui(mut commands: Commands) {
+    // Controls help in top-left
+    commands.spawn((
+        Text::new(
+            "Controls:\n\
+            • Right mouse drag: Rotate sphere\n\
+            • Mouse wheel: Zoom camera forward/back\n\
+            • WASD: Move camera up/down/left/right\n\
+            • Left click: Select/deselect tile\n\
+            • Space: Toggle wireframe mode\n\
+            • N: Toggle normal visualization\n\
+            • I: Print hexasphere info\n\
+            • Esc: Quit"
+        ),
+        TextFont {
+            font_size: 16.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.9, 0.9, 0.9)),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(12.0),
+            left: Val::Px(12.0),
+            ..default()
+        },
+    ));
+    
+    // Sphere info in top-right
+    commands.spawn((
+        Text::new("Sphere Info:\nLoading..."),
+        TextFont {
+            font_size: 14.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.7, 0.9, 1.0)), // Light blue color for sphere info
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(12.0),
+            right: Val::Px(12.0),
+            ..default()
+        },
+        SphereInfoText,
+    ));
+    
+    // Hovered tile info in bottom-left
+    commands.spawn((
+        Text::new("Hovered: None"),
+        TextFont {
+            font_size: 16.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.9, 0.9, 0.9)),
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(12.0),
+            left: Val::Px(12.0),
+            ..default()
+        },
+        HoveredTileText,
+    ));
+    
+    // Selected tile info in bottom-right
+    commands.spawn((
+        Text::new("Selected: None"),
+        TextFont {
+            font_size: 18.0,
+            ..default()
+        },
+        TextColor(Color::srgb(1.0, 1.0, 0.3)), // Yellow color for selected
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(12.0),
+            right: Val::Px(12.0),
+            ..default()
+        },
+        SelectedTileText,
+    ));
+    
     println!("   Run with --screenshot flag to auto-capture screenshot and exit");
 }
 
