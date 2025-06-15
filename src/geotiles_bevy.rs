@@ -5,6 +5,13 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use geotiles::{Hexasphere, ThickTile};
 use std::f32::consts::PI;
 
+// Configuration
+const SPHERE_RADIUS: f64 = 5.0;
+const SUBDIVISIONS: usize = 10;
+const TILE_SIZE: f64 = 0.99;
+const TILE_THICKNESS: f64 = 0.2;
+const USE_UNIFORM_TILES: bool = false;
+
 /// Resource to store the hexasphere and related data
 #[derive(Resource)]
 pub struct HexasphereResource {
@@ -23,6 +30,23 @@ pub struct TileComponent {
     pub is_pentagon: bool,
 }
 
+fn transform_from_matrix(matrix: [f64; 16]) -> Transform {
+    // Row-major matrix to Bevy transform
+    let right = Vec3::new(matrix[0] as f32, matrix[4] as f32, matrix[8] as f32);
+    let up = Vec3::new(matrix[1] as f32, matrix[5] as f32, matrix[9] as f32);
+    let forward = Vec3::new(matrix[2] as f32, matrix[6] as f32, matrix[10] as f32);
+    let translation = Vec3::new(matrix[3] as f32, matrix[7] as f32, matrix[11] as f32);
+
+    // Construct rotation quaternion from 3x3 basis
+    let rotation = Quat::from_mat3(&Mat3::from_cols(right, up, forward));
+
+    Transform {
+        translation,
+        rotation,
+        scale: Vec3::ONE, // Assuming no scale is embedded
+    }
+}
+
 /// Setup the hexasphere world
 pub fn setup_hexasphere_world(
     mut commands: Commands,
@@ -31,68 +55,121 @@ pub fn setup_hexasphere_world(
 ) {
     println!("🌍 Setting up hexasphere world with geotiles...");
     
-    // Configuration
-    const SPHERE_RADIUS: f64 = 5.0;
-    const SUBDIVISIONS: usize = 10;
-    const TILE_SIZE: f64 = 0.99;
+
     
     // Create hexasphere and thick tiles
     let hexasphere = Hexasphere::new(SPHERE_RADIUS, SUBDIVISIONS, TILE_SIZE);
     let uniform_radius = hexasphere.get_uniform_hexagon_radius();
-    let thick_tiles = hexasphere.create_thick_tiles(0.2); // 0.2 units thickness
+    
     
     println!("Generated {} tiles", hexasphere.tiles.len());
-    println!("Generated {} thick tiles", thick_tiles.len());
     println!("Uniform hexagon radius: {:.3}", uniform_radius);
     
     let mut tile_entities = Vec::new();
-    
-    // Spawn thick tiles
-    for (index, thick_tile) in thick_tiles.iter().enumerate() {
-        let is_pentagon = !thick_tile.is_hexagon;
-        
-        // Don't apply additional transform - thick tile vertices are already in world coordinates
-        let transform = Transform::IDENTITY;
-        
-        // Create individual material for each tile with brighter colors
-        let material = materials.add(StandardMaterial {
-            base_color: if is_pentagon {
-                Color::srgb(1.0, 0.4, 1.0) // Brighter magenta for pentagons
-            } else {
-                Color::srgb(0.4, 1.0, 0.4) // Brighter green for hexagons
-            },
-            metallic: 0.1, // Less metallic for brighter appearance
-            perceptual_roughness: 0.8, // More rough for better light scattering
-            cull_mode: Some(bevy::render::render_resource::Face::Back), // Enable back-face culling
-            ..default()
+
+    if USE_UNIFORM_TILES {
+        let approximations = hexasphere.get_regular_hexagon_approximations();
+
+        for (index, hex_params) in approximations.iter().enumerate() {
+            let is_pentagon = false;
+            println!("Hexagon {}: center={}, radius={:.3}",
+                index, hex_params.center, hex_params.radius);
+
+
+            // Use in 3D engine
+            let transform = hex_params.orientation.to_transform_matrix(&hex_params.center);
+            let mesh = Extrusion::new(RegularPolygon::new(hex_params.radius as f32, 6), TILE_THICKNESS as f32);
+
+            // Create individual material for each tile with brighter colors
+            let material = materials.add(StandardMaterial {
+                base_color: if is_pentagon {
+                    Color::srgb(1.0, 0.4, 1.0) // Brighter magenta for pentagons
+                } else {
+                    Color::srgb(0.4, 1.0, 0.4) // Brighter green for hexagons
+                },
+                metallic: 0.1, // Less metallic for brighter appearance
+                perceptual_roughness: 0.8, // More rough for better light scattering
+                cull_mode: Some(bevy::render::render_resource::Face::Back), // Enable back-face culling
+                ..default()
+            });
+
+            let mesh_handle = meshes.add(mesh);
+            
+            let entity = commands.spawn((
+                Mesh3d(mesh_handle),
+                MeshMaterial3d(material),
+                transform_from_matrix(transform),
+                TileComponent { index, is_pentagon },
+            )).id();
+            
+            tile_entities.push(entity);
+        } 
+
+        // Store the hexasphere resource
+        commands.insert_resource(HexasphereResource {
+            hexasphere,
+            thick_tiles: Vec::new(),
+            uniform_radius,
+            tile_entities: tile_entities.clone(),
+            hovered_tile: None,
+            selected_tile: None,
         });
-        
-        // Create mesh from thick tile vertices
-        let mesh = create_thick_tile_mesh(thick_tile);
-        let mesh_handle = meshes.add(mesh);
-        
-        let entity = commands.spawn((
-            Mesh3d(mesh_handle),
-            MeshMaterial3d(material),
-            transform,
-            TileComponent { index, is_pentagon },
-        )).id();
-        
-        tile_entities.push(entity);
+        let tile_count = tile_entities.len();
+        println!("✅ Hexasphere world setup complete with {} tiles!", tile_count);
+
+    } else {
+        let thick_tiles = hexasphere.create_thick_tiles(TILE_THICKNESS); // 0.2 units thickness
+        println!("Generated {} thick tiles", thick_tiles.len());
+
+        // Spawn thick tiles
+        for (index, thick_tile) in thick_tiles.iter().enumerate() {
+            let is_pentagon = !thick_tile.is_hexagon;
+            
+            // Don't apply additional transform - thick tile vertices are already in world coordinates
+            let transform = Transform::IDENTITY;
+            
+            // Create individual material for each tile with brighter colors
+            let material = materials.add(StandardMaterial {
+                base_color: if is_pentagon {
+                    Color::srgb(1.0, 0.4, 1.0) // Brighter magenta for pentagons
+                } else {
+                    Color::srgb(0.4, 1.0, 0.4) // Brighter green for hexagons
+                },
+                metallic: 0.1, // Less metallic for brighter appearance
+                perceptual_roughness: 0.8, // More rough for better light scattering
+                cull_mode: Some(bevy::render::render_resource::Face::Back), // Enable back-face culling
+                ..default()
+            });
+            
+            // Create mesh from thick tile vertices
+            let mesh = create_thick_tile_mesh(thick_tile);
+            let mesh_handle = meshes.add(mesh);
+            
+            let entity = commands.spawn((
+                Mesh3d(mesh_handle),
+                MeshMaterial3d(material),
+                transform,
+                TileComponent { index, is_pentagon },
+            )).id();
+            
+            tile_entities.push(entity);
+        }
+
+        // Store the hexasphere resource
+        commands.insert_resource(HexasphereResource {
+            hexasphere,
+            thick_tiles,
+            uniform_radius,
+            tile_entities: tile_entities.clone(),
+            hovered_tile: None,
+            selected_tile: None,
+        });
+        let tile_count = tile_entities.len();
+        println!("✅ Hexasphere world setup complete with {} tiles!", tile_count);
     }
     
-    let tile_count = tile_entities.len();
     
-    // Store the hexasphere resource
-    commands.insert_resource(HexasphereResource {
-        hexasphere,
-        thick_tiles,
-        uniform_radius,
-        tile_entities,
-        hovered_tile: None,
-        selected_tile: None,
-    });
-    
+
     // Insert border visibility resource - off by default, use wireframe mode instead
     commands.insert_resource(BorderVisibility { show_borders: false });
     
@@ -125,7 +202,7 @@ pub fn setup_hexasphere_world(
         ..default()
     });
     
-    println!("✅ Hexasphere world setup complete with {} tiles!", tile_count);
+    
 }
 
 
@@ -138,6 +215,9 @@ pub fn tile_hover_system(
     tile_query: Query<(Entity, &TileComponent, &MeshMaterial3d<StandardMaterial>, &GlobalTransform)>,
     sphere_rotation: Res<crate::camera::SphereRotation>,
 ) {
+    if USE_UNIFORM_TILES {
+        return;
+    }
     let Ok(window) = window_query.single() else { return };
     let Some(cursor_pos) = window.cursor_position() else { return };
     let Ok((camera, camera_transform)) = camera_query.single() else { return };
@@ -226,6 +306,9 @@ pub fn tile_gizmos_system(
     show_normals: Res<ShowNormals>,
     sphere_rotation: Res<crate::camera::SphereRotation>,
 ) {
+    if USE_UNIFORM_TILES {
+        return;
+    }
     // Only draw normals and selection highlights, not borders (borders are handled by wireframe mode)
     for (index, thick_tile) in hexasphere_res.thick_tiles.iter().enumerate() {
         let original_center = Vec3::new(
