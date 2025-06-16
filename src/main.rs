@@ -9,8 +9,7 @@ use bevy::window::WindowPlugin;
 use std::env;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use miniature_potato::geotiles_bevy::{
-    setup_hexasphere_world, tile_hover_system, tile_gizmos_system, toggle_borders, toggle_normals,
-    HexasphereResource
+    handle_tile_selection, setup_hexasphere_world, tile_gizmos_system, tile_hover_system, toggle_borders, toggle_normals, HexasphereResource
 };
 
 /// Resource to track screenshot timing
@@ -220,7 +219,7 @@ fn update_selected_tile_ui(
             if let Some(selected_index) = hexasphere.selected_tile {
                 if let Some(tile) = hexasphere.hexasphere.tiles.get(selected_index) {
                     let tile_type = if tile.boundary.len() == 5 { "Pentagon" } else { "Hexagon" };
-                    **text = format!("Selected: {} #{}", tile_type, selected_index);
+                    **text = format!("Selected: {} {}", tile_type, selected_index);
                 } else {
                     **text = "Selected: Invalid tile".to_string();
                 }
@@ -260,32 +259,6 @@ fn update_sphere_info_ui(
             );
         } else {
             **text = "Sphere Info:\nLoading...".to_string();
-        }
-    }
-}
-
-/// System to handle tile selection with mouse clicks
-fn handle_tile_selection(
-    mouse_input: Res<ButtonInput<MouseButton>>,
-    mut hexasphere_res: ResMut<HexasphereResource>,
-) {
-    if mouse_input.just_pressed(MouseButton::Left) {
-        if let Some(hovered_index) = hexasphere_res.hovered_tile {
-            // Toggle selection
-            if hexasphere_res.selected_tile == Some(hovered_index) {
-                // Deselect
-                hexasphere_res.selected_tile = None;
-                println!("🎯 Deselected tile");
-            } else {
-                // Select
-                hexasphere_res.selected_tile = Some(hovered_index);
-                if let Some(tile) = hexasphere_res.hexasphere.tiles.get(hovered_index) {
-                    println!("🎯 Selected {} tile {}", 
-                        if tile.boundary.len() == 5 { "pentagon" } else { "hexagon" },
-                        hovered_index
-                    );
-                }
-            }
         }
     }
 }
