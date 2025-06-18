@@ -1,16 +1,19 @@
 //! A spherical world game using geotiles for geodesic polyhedron tiling
 
-use bevy::prelude::*;
-use bevy::pbr::wireframe::{WireframePlugin, WireframeConfig};
+use bevy::color::palettes::tailwind::*;
 use bevy::dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin};
-use bevy::text::FontSmoothing;
+use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
+use bevy::picking::pointer::PointerInteraction;
+use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+use bevy::text::FontSmoothing;
 use bevy::window::WindowPlugin;
-use std::env;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use miniature_potato::geotiles_bevy::{
-    handle_tile_selection, setup_hexasphere_world, tile_gizmos_system, tile_hover_system, toggle_borders, toggle_normals, HexasphereResource
+    handle_tile_selection, setup_hexasphere_world, tile_gizmos_system, toggle_normals,
+    HexasphereResource,
 };
+use std::env;
 
 /// Resource to track screenshot timing
 #[derive(Resource)]
@@ -25,45 +28,38 @@ const TEXT_SIZE: f32 = 15.0;
 
 fn main() {
     println!("🚀 Starting miniature-potato with geotiles geodesic polyhedron");
-    
+
     // Check for screenshot flag
     let args: Vec<String> = env::args().collect();
     let screenshot_mode = args.contains(&"--screenshot".to_string());
-    
+
     if screenshot_mode {
         println!("📸 Screenshot mode enabled - will take screenshot after 2 seconds and exit");
     }
-    
+
     let mut app = App::new();
-    
+
     // Configure plugins with smaller window for screenshot mode
     if screenshot_mode {
-        app.add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "miniature-potato (screenshot)".to_string(),
-                    resolution: (800.0, 600.0).into(),
-                    ..default()
-                }),
+        app.add_plugins((DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "miniature-potato (screenshot)".to_string(),
+                resolution: (800.0, 600.0).into(),
                 ..default()
             }),
-        ));
+            ..default()
+        }),));
 
         app.insert_resource(ScreenshotTimer {
             timer: Timer::from_seconds(2.0, TimerMode::Once),
             should_screenshot: true,
             exit_timer: None,
         })
-
-        .add_systems(Update, (
-            screenshot_system,
-        ));
+        .add_systems(Update, (screenshot_system,));
     } else {
-        app.add_plugins((
-            DefaultPlugins,
-        ));
+        app.add_plugins((DefaultPlugins,));
 
-        app.insert_resource(WireframeConfig { 
+        app.insert_resource(WireframeConfig {
             global: false, // Disable wireframe by default
             default_color: Color::WHITE,
         });
@@ -71,6 +67,7 @@ fn main() {
 
     app.add_plugins((
         WireframePlugin::default(),
+        MeshPickingPlugin,
         PanOrbitCameraPlugin,
         FpsOverlayPlugin {
             config: FpsOverlayConfig {
@@ -91,36 +88,38 @@ fn main() {
             },
         },
     ));
-    
-    app.add_systems(Startup, (
-        setup_hexasphere_world, 
-        setup_ui,
-        setup_camera,
-        setup_lighting,
-    ));
 
-    app.add_systems(Update, (
-        handle_escape_key,
-        toggle_wireframe,
-        toggle_borders,
-        toggle_normals,
-        print_tile_info,
-        handle_tile_selection,
-        tile_hover_system,
-        tile_gizmos_system,
-        update_hovered_tile_ui,
-        update_selected_tile_ui,
-        update_sphere_info_ui,
-    ));
-    
+    app.add_systems(
+        Startup,
+        (
+            setup_hexasphere_world,
+            setup_ui,
+            setup_camera,
+            setup_lighting,
+        ),
+    );
+
+    app.add_systems(
+        Update,
+        (
+            draw_mesh_intersections,
+            handle_escape_key,
+            toggle_wireframe,
+            toggle_normals,
+            print_tile_info,
+            handle_tile_selection,
+            tile_gizmos_system,
+            update_hovered_tile_ui,
+            update_selected_tile_ui,
+            update_sphere_info_ui,
+        ),
+    );
+
     app.run();
 }
 
 /// System to handle escape key press for quitting the app
-fn handle_escape_key(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut exit: EventWriter<AppExit>,
-) {
+fn handle_escape_key(keyboard_input: Res<ButtonInput<KeyCode>>, mut exit: EventWriter<AppExit>) {
     if keyboard_input.just_pressed(KeyCode::Escape) {
         println!("Escape key pressed - exiting application");
         exit.write(AppExit::Success);
@@ -134,7 +133,10 @@ fn toggle_wireframe(
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
         wireframe_config.global = !wireframe_config.global;
-        println!("Wireframe mode: {}", if wireframe_config.global { "ON" } else { "OFF" });
+        println!(
+            "Wireframe mode: {}",
+            if wireframe_config.global { "ON" } else { "OFF" }
+        );
     }
 }
 
@@ -147,28 +149,36 @@ fn print_tile_info(
         if let Some(hexasphere) = hexasphere_res {
             println!("\n📊 === HEXASPHERE INFO ===");
             println!("Total tiles: {}", hexasphere.hexasphere.tiles.len());
-            
-            let pentagon_count = hexasphere.hexasphere.tiles.iter()
+
+            let pentagon_count = hexasphere
+                .hexasphere
+                .tiles
+                .iter()
                 .filter(|t| t.boundary.len() == 5)
                 .count();
-            let hexagon_count = hexasphere.hexasphere.tiles.iter()
+            let hexagon_count = hexasphere
+                .hexasphere
+                .tiles
+                .iter()
                 .filter(|t| t.boundary.len() == 6)
                 .count();
-            
+
             println!("Pentagons: {}", pentagon_count);
             println!("Hexagons: {}", hexagon_count);
             println!("Sphere radius: {}", hexasphere.hexasphere.radius);
             println!("Uniform hexagon radius: {:.3}", hexasphere.uniform_radius);
-            
-            
+
             // Calculate statistics
             let stats = hexasphere.hexasphere.calculate_hexagon_stats();
             println!("\n📐 Hexagon Statistics:");
             println!("Average radius: {:.3}", stats.average_hexagon_radius);
             println!("Min radius: {:.3}", stats.min_hexagon_radius);
             println!("Max radius: {:.3}", stats.max_hexagon_radius);
-            println!("Size variation: {:.1}%", 
-                100.0 * (stats.max_hexagon_radius - stats.min_hexagon_radius) / stats.average_hexagon_radius);
+            println!(
+                "Size variation: {:.1}%",
+                100.0 * (stats.max_hexagon_radius - stats.min_hexagon_radius)
+                    / stats.average_hexagon_radius
+            );
             println!("Standard deviation: {:.3}", stats.radius_std_deviation);
         } else {
             println!("Hexasphere not yet initialized");
@@ -185,10 +195,14 @@ fn update_hovered_tile_ui(
         if let Some(hexasphere) = hexasphere_res {
             if let Some(hovered_index) = hexasphere.hovered_tile {
                 if let Some(tile) = hexasphere.hexasphere.tiles.get(hovered_index) {
-                    let tile_type = if tile.boundary.len() == 5 { "Pentagon" } else { "Hexagon" };
+                    let tile_type = if tile.boundary.len() == 5 {
+                        "Pentagon"
+                    } else {
+                        "Hexagon"
+                    };
                     let center = &tile.center_point;
                     let lat_lon = tile.get_lat_lon(hexasphere.hexasphere.radius);
-                    
+
                     **text = format!(
                         "Type: {}\nCenter: ({:.2}, {:.2}, {:.2})\nLat/Lon: {:.1}°, {:.1}°\nNeighbors: {}\nHovered: {}",
                         tile_type,
@@ -198,7 +212,8 @@ fn update_hovered_tile_ui(
                         hovered_index,
                     );
                 } else {
-                    **text = "Type:\nCenter:\nLat/Lon:\nNeighbors:\nHovered: Invalid tile".to_string();
+                    **text =
+                        "Type:\nCenter:\nLat/Lon:\nNeighbors:\nHovered: Invalid tile".to_string();
                 }
             } else {
                 **text = "Type:\nCenter:\nLat/Lon:\nNeighbors:\nHovered: None".to_string();
@@ -218,7 +233,11 @@ fn update_selected_tile_ui(
         if let Some(hexasphere) = hexasphere_res {
             if let Some(selected_index) = hexasphere.selected_tile {
                 if let Some(tile) = hexasphere.hexasphere.tiles.get(selected_index) {
-                    let tile_type = if tile.boundary.len() == 5 { "Pentagon" } else { "Hexagon" };
+                    let tile_type = if tile.boundary.len() == 5 {
+                        "Pentagon"
+                    } else {
+                        "Hexagon"
+                    };
                     **text = format!("Selected: {} {}", tile_type, selected_index);
                 } else {
                     **text = "Selected: Invalid tile".to_string();
@@ -239,15 +258,21 @@ fn update_sphere_info_ui(
 ) {
     if let Ok(mut text) = sphere_info_query.single_mut() {
         if let Some(hexasphere) = hexasphere_res {
-            let pentagon_count = hexasphere.hexasphere.tiles.iter()
+            let pentagon_count = hexasphere
+                .hexasphere
+                .tiles
+                .iter()
                 .filter(|t| t.boundary.len() == 5)
                 .count();
-            let hexagon_count = hexasphere.hexasphere.tiles.iter()
+            let hexagon_count = hexasphere
+                .hexasphere
+                .tiles
+                .iter()
                 .filter(|t| t.boundary.len() == 6)
                 .count();
-            
+
             let stats = hexasphere.hexasphere.calculate_hexagon_stats();
-            
+
             **text = format!(
                 "Sphere Info:\nTotal tiles: {}\nPentagons: {}\nHexagons: {}\nRadius: {:.1}\nAvg hex radius: {:.3}\nSize variation: {:.1}%",
                 hexasphere.hexasphere.tiles.len(),
@@ -262,7 +287,6 @@ fn update_sphere_info_ui(
         }
     }
 }
-
 
 /// Component to mark the hovered tile info text
 #[derive(Component)]
@@ -325,7 +349,7 @@ fn setup_ui(mut commands: Commands) {
             * Space: Toggle wireframe mode\n\
             * N: Toggle normal visualization\n\
             * I: Print hexasphere info\n\
-            * Esc: Quit"
+            * Esc: Quit",
         ),
         TextFont {
             font_size: TEXT_SIZE,
@@ -339,7 +363,7 @@ fn setup_ui(mut commands: Commands) {
             ..default()
         },
     ));
-    
+
     // Sphere info in top-right
     commands.spawn((
         Text::new("Sphere Info:\nLoading..."),
@@ -356,7 +380,7 @@ fn setup_ui(mut commands: Commands) {
         },
         SphereInfoText,
     ));
-    
+
     // Hovered tile info in bottom-left
     commands.spawn((
         Text::new("Hovered: None"),
@@ -373,7 +397,7 @@ fn setup_ui(mut commands: Commands) {
         },
         HoveredTileText,
     ));
-    
+
     // Selected tile info in bottom-right
     commands.spawn((
         Text::new("Selected: None"),
@@ -390,7 +414,7 @@ fn setup_ui(mut commands: Commands) {
         },
         SelectedTileText,
     ));
-    
+
     println!("   Run with --screenshot flag to auto-capture screenshot and exit");
 }
 
@@ -405,46 +429,51 @@ fn screenshot_system(
     // Take screenshot after initial delay
     if timer_res.should_screenshot {
         timer_res.timer.tick(time.delta());
-        
+
         if timer_res.timer.just_finished() {
             let timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            
+
             // Use absolute path to repo root
             let repo_root = "/Users/rltvty/src/github.com/rltvty/miniature-potato";
             let filename = format!("{}/screenshot_{}.png", repo_root, timestamp);
-            
+
             println!("📸 Taking screenshot: {}", filename);
-            
+
             // Try to get the window entity first
             if let Ok(window_entity) = windows.single() {
                 println!("Found window entity: {:?}", window_entity);
-                
+
                 // Take screenshot using the new Bevy 0.16.1 API with specific window
                 use bevy::render::camera::RenderTarget;
                 use bevy::window::WindowRef;
                 commands
-                    .spawn(Screenshot(RenderTarget::Window(WindowRef::Entity(window_entity))))
+                    .spawn(Screenshot(RenderTarget::Window(WindowRef::Entity(
+                        window_entity,
+                    ))))
                     .observe(save_to_disk(filename.clone()));
             } else {
                 println!("No window entity found, using primary_window()");
-                
+
                 // Fallback to primary window
                 commands
                     .spawn(Screenshot::primary_window())
                     .observe(save_to_disk(filename.clone()));
             }
-            
+
             timer_res.should_screenshot = false;
             // Start exit timer to allow screenshot to save
             timer_res.exit_timer = Some(Timer::from_seconds(1.0, TimerMode::Once));
-            
-            println!("✅ Screenshot command sent as {}, will exit in 1 second...", filename);
+
+            println!(
+                "✅ Screenshot command sent as {}, will exit in 1 second...",
+                filename
+            );
         }
     }
-    
+
     // Handle exit timer
     if let Some(ref mut exit_timer) = timer_res.exit_timer {
         exit_timer.tick(time.delta());
@@ -452,5 +481,17 @@ fn screenshot_system(
             println!("⏰ Exit timer finished, shutting down...");
             exit.write(AppExit::Success);
         }
+    }
+}
+
+/// A system that draws hit indicators for every pointer.
+fn draw_mesh_intersections(pointers: Query<&PointerInteraction>, mut gizmos: Gizmos) {
+    for (point, normal) in pointers
+        .iter()
+        .filter_map(|interaction| interaction.get_nearest_hit())
+        .filter_map(|(_entity, hit)| hit.position.zip(hit.normal))
+    {
+        gizmos.sphere(point, 0.05, RED_500);
+        gizmos.arrow(point, point + normal.normalize() * 0.5, PINK_100);
     }
 }
