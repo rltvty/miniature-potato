@@ -1,14 +1,14 @@
 //! A spherical world game using geotiles for geodesic polyhedron tiling
 
 use bevy::color::palettes::tailwind::*;
-use bevy::dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin};
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
 use bevy::picking::pointer::PointerInteraction;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
-use bevy::text::FontSmoothing;
 use bevy::window::WindowPlugin;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+use iyes_perf_ui::prelude::{PerfUiAllEntries};
+use iyes_perf_ui::PerfUiPlugin;
 use miniature_potato::geotiles_bevy::{
     handle_tile_selection, setup_hexasphere_world, tile_gizmos_system, toggle_normals,
     HexasphereResource,
@@ -69,24 +69,15 @@ fn main() {
         WireframePlugin::default(),
         MeshPickingPlugin,
         PanOrbitCameraPlugin,
-        FpsOverlayPlugin {
-            config: FpsOverlayConfig {
-                text_config: TextFont {
-                    // Here we define size of our overlay
-                    font_size: TEXT_SIZE,
-                    // If we want, we can use a custom font
-                    font: default(),
-                    // We could also disable font smoothing,
-                    font_smoothing: FontSmoothing::default(),
-                    ..default()
-                },
-                // We can also change color of the overlay
-                text_color: TEXT_COLOR,
-                // We can also set the refresh interval for the FPS counter
-                refresh_interval: core::time::Duration::from_millis(100),
-                enabled: true,
-            },
-        },
+
+        // we want Bevy to measure these values for us:
+        bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
+        bevy::diagnostic::EntityCountDiagnosticsPlugin,
+        bevy::diagnostic::SystemInformationDiagnosticsPlugin,
+        bevy::render::diagnostic::RenderDiagnosticsPlugin,
+
+        // to be shown in this plugin:
+        PerfUiPlugin,
     ));
 
     app.add_systems(
@@ -338,6 +329,8 @@ fn setup_lighting(mut commands: Commands) {
 
 /// Setup the UI with on-screen controls help and tile info displays
 fn setup_ui(mut commands: Commands) {
+    commands.spawn(PerfUiAllEntries::default());
+
     // Controls help in top-left
     commands.spawn((
         Text::new(
@@ -358,13 +351,13 @@ fn setup_ui(mut commands: Commands) {
         TextColor(TEXT_COLOR),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(24.0),
+            top: Val::Px(12.0),
             left: Val::Px(12.0),
             ..default()
         },
     ));
 
-    // Sphere info in top-right
+    // Sphere info in bottom-right
     commands.spawn((
         Text::new("Sphere Info:\nLoading..."),
         TextFont {
@@ -374,7 +367,7 @@ fn setup_ui(mut commands: Commands) {
         TextColor(TEXT_COLOR),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(12.0),
+            bottom: Val::Px(12.0),
             right: Val::Px(12.0),
             ..default()
         },
@@ -398,22 +391,28 @@ fn setup_ui(mut commands: Commands) {
         HoveredTileText,
     ));
 
-    // Selected tile info in bottom-right
-    commands.spawn((
-        Text::new("Selected: None"),
-        TextFont {
-            font_size: TEXT_SIZE,
-            ..default()
-        },
-        TextColor(TEXT_COLOR),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(12.0),
-            right: Val::Px(12.0),
-            ..default()
-        },
-        SelectedTileText,
-    ));
+    // Selected tile info in bottom-center
+    commands.spawn(Node {
+        position_type: PositionType::Absolute,
+        bottom: Val::Px(12.0),
+        width: Val::Percent(100.0),
+        height: Val::Auto,
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        ..default()
+    }).with_children(|parent| {
+        // Selected tile info (now centered horizontally)
+        parent.spawn((
+            Text::new("Selected: None"),
+            TextFont {
+                font_size: TEXT_SIZE,
+                ..default()
+            },
+            TextColor(TEXT_COLOR),
+            Node::default(), // No positioning needed, flexbox handles it
+            SelectedTileText,
+        ));
+    });
 
     println!("   Run with --screenshot flag to auto-capture screenshot and exit");
 }
