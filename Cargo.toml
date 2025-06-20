@@ -7,7 +7,7 @@ edition = "2021"
 [dependencies]
 bevy = { version = "0.16.1", features = ["dynamic_linking", "bevy_dev_tools"] }
 rand = "0.8.5"
-geotiles = { git = "https://github.com/rltvty/geotiles" }
+geotiles = { git = "https://github.com/rltvty/geotiles", branch = "specific_tiles" }
 bevy_panorbit_camera = "0.26.0"
 iyes_perf_ui = "0.5.0"
 

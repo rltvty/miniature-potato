@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
-use geotiles::{Hexasphere, Point, RegularHexagonParams, ThickTile, Vector3};
+use geotiles::{Hexasphere, Point, RegularHexagonParams, ThickTile, TileInstance, Vector3};
 use std::f32::consts::PI;
 
 // Configuration
@@ -10,8 +10,18 @@ const SPHERE_RADIUS: f64 = 5.0;
 const SUBDIVISIONS: usize = 10;
 const TILE_SIZE: f64 = 0.95;
 const TILE_THICKNESS: f64 = 0.1;
-const USE_UNIFORM_TILES: bool = false;
+const TILE_SHAPE: TileShape = TileShape::Simplified;
+const MAX_SIMPLIFIED_SHAPES: usize = 3;
+const SIMPLIFIED_SHAPE_TOLERANCE: f64 = 0.05;
 const USE_THICK_TILES: bool = false;
+
+// Define the enum
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TileShape {
+    Uniform,
+    Simplified,
+    Exact,
+}
 
 /// Resource to store the hexasphere and related data
 #[derive(Resource)]
@@ -61,6 +71,22 @@ fn transform_from_hexagon_params(hex_params: &RegularHexagonParams) -> Transform
     Transform::from_matrix(matrix)
 }
 
+fn transform_from_instance_params(instance: &TileInstance) -> Transform {
+    let translation = vec3_from_point(&instance.center);
+    let right = vec3_from_vector3(&instance.orientation.right).normalize();
+    let up = vec3_from_vector3(&instance.orientation.up).normalize();
+    let forward = vec3_from_vector3(&instance.orientation.forward).normalize();
+
+    let matrix = Mat4::from_cols(
+        Vec4::new(forward.x, forward.y, forward.z, 0.0),
+        Vec4::new(right.x, right.y, right.z, 0.0),
+        Vec4::new(up.x, up.y, up.z , 0.0),
+        Vec4::new(translation.x, translation.y, translation.z, 1.0),
+    );
+
+    Transform::from_matrix(matrix)
+}
+
 fn get_material(
     materials: &mut Assets<StandardMaterial>,
     base_color: Color,
@@ -78,23 +104,20 @@ fn get_material(
 
 fn add_entity(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     tile_entities: &mut Vec<Entity>,
-    mesh: Mesh,
+    mesh: Handle<Mesh>,
     material: Handle<StandardMaterial>,
     hover_material: Handle<StandardMaterial>,
     transform: Transform,
     tile_component: TileComponent,
 ) {
-    let mesh_handle = meshes.add(mesh);
-
     let entity = commands
         .spawn((
-            Mesh3d(mesh_handle),
+            Mesh3d(mesh),
             MeshMaterial3d(material.clone()),
             TileMaterials {
-                normal: material.clone(),
-                hover: hover_material.clone(),
+                normal: material,
+                hover: hover_material,
             },
             transform,
             tile_component,
@@ -140,61 +163,122 @@ pub fn setup_hexasphere_world(
         LinearRgba::rgb(0.5, 0.5, 0.0),
     ); // Yellow
 
-    if USE_UNIFORM_TILES {
-        let approximations = hexasphere.get_regular_hexagon_approximations();
-        println!("Generated {} approximation tiles", approximations.len());
+    match TILE_SHAPE {
+        TileShape::Uniform => {
+            let approximations = hexasphere.get_regular_hexagon_approximations();
+            println!("Generated {} approximation tiles", approximations.len());
 
-        for (index, hex_params) in approximations.iter().enumerate() {
-            let transform = transform_from_hexagon_params(&hex_params);
             let mesh = Extrusion::new(
-                RegularPolygon::new(hex_params.radius as f32, 6),
-                TILE_THICKNESS as f32,
-            );
-            let tile_component = TileComponent {
-                index,
-                is_hexagon: true,
-            };
+                    RegularPolygon::new(approximations[0].radius as f32, 6),
+                    TILE_THICKNESS as f32,
+                );
+            let mesh = meshes.add(mesh);
 
-            add_entity(
-                &mut commands,
-                &mut meshes,
-                &mut tile_entities,
-                mesh.into(),
-                hexagon_material.clone(),
-                hover_material.clone(),
-                transform,
-                tile_component,
-            );
-        }
-    } else {
-        thick_tiles = hexasphere.create_thick_tiles(TILE_THICKNESS); // 0.2 units thickness
-        println!("Generated {} thick tiles", thick_tiles.len());
+            for (index, hex_params) in approximations.iter().enumerate() {
+                let transform = transform_from_hexagon_params(&hex_params);
+                let tile_component = TileComponent { index, is_hexagon: true};
 
-        // Spawn thick tiles
-        for (index, thick_tile) in thick_tiles.iter().enumerate() {
-            // Don't apply additional transform - thick tile vertices are already in world coordinates
-            let transform = Transform::IDENTITY;
-            let material = if thick_tile.is_hexagon {
-                hexagon_material.clone()
-            } else {
-                pentagon_material.clone()
-            };
-            let mesh = create_thick_tile_mesh(thick_tile); // Create mesh from thick tile vertices
-            let tile_component = TileComponent {
-                index,
-                is_hexagon: thick_tile.is_hexagon,
-            };
+                add_entity(
+                    &mut commands,
+                    &mut tile_entities,
+                    mesh.clone(),
+                    hexagon_material.clone(),
+                    hover_material.clone(),
+                    transform,
+                    tile_component,
+                );
+            }
+        },
+        TileShape::Simplified => {
+            let shape_data = hexasphere.get_normalized_shape_instances(MAX_SIMPLIFIED_SHAPES, SIMPLIFIED_SHAPE_TOLERANCE);
+            println!("Deterimied {} shapes that will map to {} tile instances", shape_data.shapes.len(), shape_data.instances.len());
 
-            add_entity(
-                &mut commands,
-                &mut meshes,
-                &mut tile_entities,
-                mesh.into(),
-                material,
-                hover_material.clone(),
-                transform,
-                tile_component,
-            );
+            // use geotiles::{Hexasphere, TileShape};
+
+
+
+            // // Instance rendering with transforms
+            // for instance in &shape_data.instances {
+            //     let transform = Transform::from_matrix(
+            //         Mat4::from_cols_array(&instance.orientation.to_transform_matrix(&instance.center))
+            //     );
+            //     // spawn with mesh_handle and transform
+            // }
+
+
+            let mut tile_meshes: Vec<Handle<Mesh>> = Vec::with_capacity(shape_data.shapes.len());
+
+            fn vertices_to_array<const N: usize>(vertices: &[Point]) -> [Vec2; N] {
+                vertices.iter()
+                    .map(|v| Vec2::new(v.x as f32, v.y as f32))
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap_or_else(|_| panic!("Expected exactly {N} vertices"))
+            }
+
+            fn build_convex_mesh<const N: usize>(vertices: &[Point], meshes: &mut Assets<Mesh>) -> Handle<Mesh> {
+                let points = vertices_to_array::<N>(vertices);
+                let polygon = ConvexPolygon::new(points).expect("Failed to create convex polygon");
+                meshes.add(Extrusion::new(polygon, TILE_THICKNESS as f32))
+            }
+
+            for (_index, shape) in shape_data.shapes.iter().enumerate() {
+                tile_meshes.push(match shape.vertices.len() {
+                    6 => build_convex_mesh::<6>(&shape.vertices, &mut meshes),
+                    5 => build_convex_mesh::<5>(&shape.vertices, &mut meshes),
+                    _ => panic!("Expected only hexagons and pentagons"),
+                });
+            }
+
+            for (index, instance) in shape_data.instances.iter().enumerate() {
+                let transform = transform_from_instance_params(&instance);
+                let mesh = tile_meshes[instance.shape_index].clone();
+                let tile_component = TileComponent {
+                    index,
+                    is_hexagon: true,
+                };
+
+                add_entity(
+                    &mut commands,
+                    &mut tile_entities,
+                    mesh,
+                    hexagon_material.clone(),
+                    hover_material.clone(),
+                    transform,
+                    tile_component,
+                );
+            }
+        },
+        TileShape::Exact => {
+            thick_tiles = hexasphere.create_thick_tiles(TILE_THICKNESS); // 0.2 units thickness
+            println!("Generated {} thick tiles", thick_tiles.len());
+
+            // Spawn thick tiles
+            for (index, thick_tile) in thick_tiles.iter().enumerate() {
+                // Don't apply additional transform - thick tile vertices are already in world coordinates
+                let transform = Transform::IDENTITY;
+                let material = if thick_tile.is_hexagon {
+                    hexagon_material.clone()
+                } else {
+                    pentagon_material.clone()
+                };
+                let mesh = create_thick_tile_mesh(thick_tile); // Create mesh from thick tile vertices
+                let tile_component = TileComponent {
+                    index,
+                    is_hexagon: thick_tile.is_hexagon,
+                };
+                let mesh = meshes.add(mesh);
+
+                add_entity(
+                    &mut commands,
+                    &mut tile_entities,
+                    mesh,
+                    material,
+                    hover_material.clone(),
+                    transform,
+                    tile_component,
+                );
+            }
         }
     }
 
@@ -290,7 +374,7 @@ pub fn tile_gizmos_system(
     hexasphere_res: Res<HexasphereResource>,
     show_normals: Res<ShowNormals>,
 ) {
-    if USE_UNIFORM_TILES {
+    if TILE_SHAPE != TileShape::Exact {
         return;
     }
     // Only draw normals and selection highlights, not borders (borders are handled by wireframe mode)
