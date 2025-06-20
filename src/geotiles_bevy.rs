@@ -8,11 +8,11 @@ use std::f32::consts::PI;
 // Configuration
 const SPHERE_RADIUS: f64 = 5.0;
 const SUBDIVISIONS: usize = 10;
-const TILE_SIZE: f64 = 0.95;
+const TILE_SIZE: f64 = 0.99;
 const TILE_THICKNESS: f64 = 0.1;
 const TILE_SHAPE: TileShape = TileShape::Simplified;
-const MAX_SIMPLIFIED_SHAPES: usize = 3;
-const SIMPLIFIED_SHAPE_TOLERANCE: f64 = 0.05;
+const MAX_SIMPLIFIED_SHAPES: usize = 200;
+const SIMPLIFIED_SHAPE_TOLERANCE: f64 = 0.001;
 const USE_THICK_TILES: bool = false;
 
 // Define the enum
@@ -77,10 +77,16 @@ fn transform_from_instance_params(instance: &TileInstance) -> Transform {
     let up = vec3_from_vector3(&instance.orientation.up).normalize();
     let forward = vec3_from_vector3(&instance.orientation.forward).normalize();
 
+    // The extrusion primitive creates a shape in the XY plane and extrudes along +Z
+    // We need to orient it so the face normal (Z axis) points inward toward sphere center
+    // This means:
+    // - Local X (right in 2D shape) maps to the tile's right
+    // - Local Y (up in 2D shape) maps to the tile's forward  
+    // - Local Z (extrusion direction) maps to the tile's -up (inward normal)
     let matrix = Mat4::from_cols(
-        Vec4::new(forward.x, forward.y, forward.z, 0.0),
         Vec4::new(right.x, right.y, right.z, 0.0),
-        Vec4::new(up.x, up.y, up.z , 0.0),
+        Vec4::new(forward.x, forward.y, forward.z, 0.0),
+        Vec4::new(-up.x, -up.y, -up.z, 0.0),
         Vec4::new(translation.x, translation.y, translation.z, 1.0),
     );
 
@@ -193,23 +199,11 @@ pub fn setup_hexasphere_world(
             let shape_data = hexasphere.get_normalized_shape_instances(MAX_SIMPLIFIED_SHAPES, SIMPLIFIED_SHAPE_TOLERANCE);
             println!("Deterimied {} shapes that will map to {} tile instances", shape_data.shapes.len(), shape_data.instances.len());
 
-            // use geotiles::{Hexasphere, TileShape};
-
-
-
-            // // Instance rendering with transforms
-            // for instance in &shape_data.instances {
-            //     let transform = Transform::from_matrix(
-            //         Mat4::from_cols_array(&instance.orientation.to_transform_matrix(&instance.center))
-            //     );
-            //     // spawn with mesh_handle and transform
-            // }
-
-
             let mut tile_meshes: Vec<Handle<Mesh>> = Vec::with_capacity(shape_data.shapes.len());
 
             fn vertices_to_array<const N: usize>(vertices: &[Point]) -> [Vec2; N] {
                 vertices.iter()
+                    .rev() // Reverse to flip winding order for correct face orientation
                     .map(|v| Vec2::new(v.x as f32, v.y as f32))
                     .collect::<Vec<_>>()
                     .try_into()
@@ -219,7 +213,12 @@ pub fn setup_hexasphere_world(
             fn build_convex_mesh<const N: usize>(vertices: &[Point], meshes: &mut Assets<Mesh>) -> Handle<Mesh> {
                 let points = vertices_to_array::<N>(vertices);
                 let polygon = ConvexPolygon::new(points).expect("Failed to create convex polygon");
-                meshes.add(Extrusion::new(polygon, TILE_THICKNESS as f32))
+                let mut mesh = Extrusion::new(polygon, TILE_THICKNESS as f32).mesh().build();
+                
+                // Recompute normals to ensure they're correct
+                mesh.compute_normals();
+                
+                meshes.add(mesh)
             }
 
             for (_index, shape) in shape_data.shapes.iter().enumerate() {
@@ -233,16 +232,26 @@ pub fn setup_hexasphere_world(
             for (index, instance) in shape_data.instances.iter().enumerate() {
                 let transform = transform_from_instance_params(&instance);
                 let mesh = tile_meshes[instance.shape_index].clone();
+                
+                // Determine if this is a hexagon or pentagon based on the shape
+                let shape = &shape_data.shapes[instance.shape_index];
+                let is_hexagon = shape.vertices.len() == 6;
+                let material = if is_hexagon {
+                    hexagon_material.clone()
+                } else {
+                    pentagon_material.clone()
+                };
+                
                 let tile_component = TileComponent {
                     index,
-                    is_hexagon: true,
+                    is_hexagon,
                 };
 
                 add_entity(
                     &mut commands,
                     &mut tile_entities,
                     mesh,
-                    hexagon_material.clone(),
+                    material,
                     hover_material.clone(),
                     transform,
                     tile_component,
