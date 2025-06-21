@@ -81,7 +81,7 @@ fn transform_from_instance_params(instance: &TileInstance) -> Transform {
     // We need to orient it so the face normal (Z axis) points inward toward sphere center
     // This means:
     // - Local X (right in 2D shape) maps to the tile's right
-    // - Local Y (up in 2D shape) maps to the tile's forward  
+    // - Local Y (up in 2D shape) maps to the tile's forward
     // - Local Z (extrusion direction) maps to the tile's -up (inward normal)
     let matrix = Mat4::from_cols(
         Vec4::new(right.x, right.y, right.z, 0.0),
@@ -175,14 +175,17 @@ pub fn setup_hexasphere_world(
             println!("Generated {} approximation tiles", approximations.len());
 
             let mesh = Extrusion::new(
-                    RegularPolygon::new(approximations[0].radius as f32, 6),
-                    TILE_THICKNESS as f32,
-                );
+                RegularPolygon::new(approximations[0].radius as f32, 6),
+                TILE_THICKNESS as f32,
+            );
             let mesh = meshes.add(mesh);
 
             for (index, hex_params) in approximations.iter().enumerate() {
                 let transform = transform_from_hexagon_params(&hex_params);
-                let tile_component = TileComponent { index, is_hexagon: true};
+                let tile_component = TileComponent {
+                    index,
+                    is_hexagon: true,
+                };
 
                 add_entity(
                     &mut commands,
@@ -194,15 +197,21 @@ pub fn setup_hexasphere_world(
                     tile_component,
                 );
             }
-        },
+        }
         TileShape::Simplified => {
-            let shape_data = hexasphere.get_normalized_shape_instances(MAX_SIMPLIFIED_SHAPES, SIMPLIFIED_SHAPE_TOLERANCE);
-            println!("Deterimied {} shapes that will map to {} tile instances", shape_data.shapes.len(), shape_data.instances.len());
+            let shape_data = hexasphere
+                .get_normalized_shape_instances(MAX_SIMPLIFIED_SHAPES, SIMPLIFIED_SHAPE_TOLERANCE);
+            println!(
+                "Deterimied {} shapes that will map to {} tile instances",
+                shape_data.shapes.len(),
+                shape_data.instances.len()
+            );
 
             let mut tile_meshes: Vec<Handle<Mesh>> = Vec::with_capacity(shape_data.shapes.len());
 
             fn vertices_to_array<const N: usize>(vertices: &[Point]) -> [Vec2; N] {
-                vertices.iter()
+                vertices
+                    .iter()
                     .rev() // Reverse to flip winding order for correct face orientation
                     .map(|v| Vec2::new(v.x as f32, v.y as f32))
                     .collect::<Vec<_>>()
@@ -210,14 +219,19 @@ pub fn setup_hexasphere_world(
                     .unwrap_or_else(|_| panic!("Expected exactly {N} vertices"))
             }
 
-            fn build_convex_mesh<const N: usize>(vertices: &[Point], meshes: &mut Assets<Mesh>) -> Handle<Mesh> {
+            fn build_convex_mesh<const N: usize>(
+                vertices: &[Point],
+                meshes: &mut Assets<Mesh>,
+            ) -> Handle<Mesh> {
                 let points = vertices_to_array::<N>(vertices);
                 let polygon = ConvexPolygon::new(points).expect("Failed to create convex polygon");
-                let mut mesh = Extrusion::new(polygon, TILE_THICKNESS as f32).mesh().build();
-                
+                let mut mesh = Extrusion::new(polygon, TILE_THICKNESS as f32)
+                    .mesh()
+                    .build();
+
                 // Recompute normals to ensure they're correct
                 mesh.compute_normals();
-                
+
                 meshes.add(mesh)
             }
 
@@ -232,7 +246,7 @@ pub fn setup_hexasphere_world(
             for (index, instance) in shape_data.instances.iter().enumerate() {
                 let transform = transform_from_instance_params(&instance);
                 let mesh = tile_meshes[instance.shape_index].clone();
-                
+
                 // Determine if this is a hexagon or pentagon based on the shape
                 let shape = &shape_data.shapes[instance.shape_index];
                 let is_hexagon = shape.vertices.len() == 6;
@@ -241,11 +255,8 @@ pub fn setup_hexasphere_world(
                 } else {
                     pentagon_material.clone()
                 };
-                
-                let tile_component = TileComponent {
-                    index,
-                    is_hexagon,
-                };
+
+                let tile_component = TileComponent { index, is_hexagon };
 
                 add_entity(
                     &mut commands,
@@ -257,7 +268,7 @@ pub fn setup_hexasphere_world(
                     tile_component,
                 );
             }
-        },
+        }
         TileShape::Exact => {
             thick_tiles = hexasphere.create_thick_tiles(TILE_THICKNESS); // 0.2 units thickness
             println!("Generated {} thick tiles", thick_tiles.len());

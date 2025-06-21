@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use bevy::window::WindowPlugin;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
-use iyes_perf_ui::prelude::{PerfUiAllEntries};
+use iyes_perf_ui::prelude::PerfUiAllEntries;
 use iyes_perf_ui::PerfUiPlugin;
 use miniature_potato::geotiles_bevy::{
     handle_tile_selection, setup_hexasphere_world, tile_gizmos_system, toggle_normals,
@@ -69,13 +69,11 @@ fn main() {
         WireframePlugin::default(),
         MeshPickingPlugin,
         PanOrbitCameraPlugin,
-
         // we want Bevy to measure these values for us:
         bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
         bevy::diagnostic::EntityCountDiagnosticsPlugin,
         bevy::diagnostic::SystemInformationDiagnosticsPlugin,
         bevy::render::diagnostic::RenderDiagnosticsPlugin,
-
         // to be shown in this plugin:
         PerfUiPlugin,
     ));
@@ -392,27 +390,29 @@ fn setup_ui(mut commands: Commands) {
     ));
 
     // Selected tile info in bottom-center
-    commands.spawn(Node {
-        position_type: PositionType::Absolute,
-        bottom: Val::Px(12.0),
-        width: Val::Percent(100.0),
-        height: Val::Auto,
-        justify_content: JustifyContent::Center,
-        align_items: AlignItems::Center,
-        ..default()
-    }).with_children(|parent| {
-        // Selected tile info (now centered horizontally)
-        parent.spawn((
-            Text::new("Selected: None"),
-            TextFont {
-                font_size: TEXT_SIZE,
-                ..default()
-            },
-            TextColor(TEXT_COLOR),
-            Node::default(), // No positioning needed, flexbox handles it
-            SelectedTileText,
-        ));
-    });
+    commands
+        .spawn(Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(12.0),
+            width: Val::Percent(100.0),
+            height: Val::Auto,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|parent| {
+            // Selected tile info (now centered horizontally)
+            parent.spawn((
+                Text::new("Selected: None"),
+                TextFont {
+                    font_size: TEXT_SIZE,
+                    ..default()
+                },
+                TextColor(TEXT_COLOR),
+                Node::default(), // No positioning needed, flexbox handles it
+                SelectedTileText,
+            ));
+        });
 
     println!("   Run with --screenshot flag to auto-capture screenshot and exit");
 }
