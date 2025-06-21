@@ -29,3 +29,5 @@ data
 vendor
 
 .DS_Store
+
+docs/
