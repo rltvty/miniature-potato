@@ -4,13 +4,14 @@ use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use geotiles::{Hexasphere, Point, RegularHexagonParams, ThickTile, TileInstance, Vector3};
 use std::f32::consts::PI;
+use std::collections::HashSet;
 
 // Configuration
 const SPHERE_RADIUS: f64 = 5.0;
 const SUBDIVISIONS: usize = 10;
 const TILE_SIZE: f64 = 0.99;
 const TILE_THICKNESS: f64 = 0.1;
-const TILE_SHAPE: TileShape = TileShape::Simplified;
+const TILE_SHAPE: TileShape = TileShape::Exact;
 const MAX_SIMPLIFIED_SHAPES: usize = 200;
 const SIMPLIFIED_SHAPE_TOLERANCE: f64 = 0.001;
 const USE_THICK_TILES: bool = false;
@@ -31,7 +32,7 @@ pub struct HexasphereResource {
     pub uniform_radius: f64,
     pub tile_entities: Vec<Entity>,
     pub hovered_tile: Option<usize>,
-    pub selected_tile: Option<usize>,
+    pub selected_tiles: HashSet<usize>,
 }
 
 /// Component to mark tile entities
@@ -309,7 +310,7 @@ pub fn setup_hexasphere_world(
         uniform_radius,
         tile_entities: tile_entities.clone(),
         hovered_tile: None,
-        selected_tile: None,
+        selected_tiles: HashSet::new(),
     });
     let tile_count = tile_entities.len();
     println!(
@@ -365,13 +366,13 @@ pub fn handle_tile_selection(
     if mouse_input.just_pressed(MouseButton::Left) {
         if let Some(hovered_index) = hexasphere_res.hovered_tile {
             // Toggle selection
-            if hexasphere_res.selected_tile == Some(hovered_index) {
+            if hexasphere_res.selected_tiles.contains(&hovered_index) {
                 // Deselect
-                hexasphere_res.selected_tile = None;
-                println!("🎯 Deselected tile");
+                hexasphere_res.selected_tiles.remove(&hovered_index);
+                println!("🎯 Deselected tile {}", hovered_index);
             } else {
                 // Select
-                hexasphere_res.selected_tile = Some(hovered_index);
+                hexasphere_res.selected_tiles.insert(hovered_index);
                 if let Some(tile) = hexasphere_res.hexasphere.tiles.get(hovered_index) {
                     println!(
                         "🎯 Selected {} tile {}",
@@ -384,6 +385,7 @@ pub fn handle_tile_selection(
                     );
                 }
             }
+            println!("📊 Total selected tiles: {}", hexasphere_res.selected_tiles.len());
         }
     }
 }
@@ -404,7 +406,7 @@ pub fn tile_gizmos_system(
         // Apply sphere rotation to get current world position
         let rotated_center = original_center;
 
-        let is_selected = hexasphere_res.selected_tile == Some(index);
+        let is_selected = hexasphere_res.selected_tiles.contains(&index);
 
         // Draw selection highlight as a wireframe outline with rotation applied
         if is_selected {

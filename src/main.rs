@@ -220,19 +220,11 @@ fn update_selected_tile_ui(
 ) {
     if let Ok(mut text) = selected_text_query.single_mut() {
         if let Some(hexasphere) = hexasphere_res {
-            if let Some(selected_index) = hexasphere.selected_tile {
-                if let Some(tile) = hexasphere.hexasphere.tiles.get(selected_index) {
-                    let tile_type = if tile.boundary.len() == 5 {
-                        "Pentagon"
-                    } else {
-                        "Hexagon"
-                    };
-                    **text = format!("Selected: {} {}", tile_type, selected_index);
-                } else {
-                    **text = "Selected: Invalid tile".to_string();
-                }
-            } else {
+            let selected_count = hexasphere.selected_tiles.len();
+            if selected_count == 0 {
                 **text = "Selected: None".to_string();
+            } else {
+                **text = format!("Selected: {} tiles", selected_count);
             }
         } else {
             **text = "Selected: Loading...".to_string();
