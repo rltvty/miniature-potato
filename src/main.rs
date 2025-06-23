@@ -13,6 +13,7 @@ use miniature_potato::geotiles_bevy::{
     handle_tile_selection, setup_hexasphere_world, tile_gizmos_system, toggle_normals,
     HexasphereResource,
 };
+use miniature_potato::character::{setup_character, CharacterResource};
 use std::env;
 
 /// Resource to track screenshot timing
@@ -78,10 +79,14 @@ fn main() {
         PerfUiPlugin,
     ));
 
+    // Initialize character resource
+    app.insert_resource(CharacterResource { entity: None });
+
     app.add_systems(
         Startup,
         (
             setup_hexasphere_world,
+            setup_character.after(setup_hexasphere_world),
             setup_ui,
             setup_camera,
             setup_lighting,

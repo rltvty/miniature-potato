@@ -48,6 +48,7 @@ struct TileMaterials {
     hover: Handle<StandardMaterial>,
 }
 
+
 fn vec3_from_point(p: &Point) -> Vec3 {
     Vec3::new(p.x as f32, p.y as f32, p.z as f32)
 }
@@ -323,6 +324,7 @@ pub fn setup_hexasphere_world(
         show_normals: false,
     });
 }
+
 
 fn on_tile_hover(
     trigger: Trigger<Pointer<Over>>,
