@@ -13,7 +13,7 @@ use miniature_potato::geotiles_bevy::{
     handle_tile_selection, setup_hexasphere_world, tile_gizmos_system, toggle_normals,
     HexasphereResource,
 };
-use miniature_potato::character::{setup_character, CharacterResource};
+use miniature_potato::character::{setup_character, handle_character_movement, CharacterResource};
 use std::env;
 
 /// Resource to track screenshot timing
@@ -102,6 +102,7 @@ fn main() {
             toggle_normals,
             print_tile_info,
             handle_tile_selection,
+            handle_character_movement,
             tile_gizmos_system,
             update_hovered_tile_ui,
             update_selected_tile_ui,
@@ -287,9 +288,23 @@ struct SelectedTileText;
 struct SphereInfoText;
 
 fn setup_camera(mut commands: Commands) {
+    use std::f32::consts::PI;
+    
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, 15.0, 5.0)),
-        PanOrbitCamera::default(),
+        PanOrbitCamera {
+            // Start with 90 degree rotation for horizontal tile alignment
+            yaw: Some(PI / 2.0), // 90 degrees in radians
+            target_yaw: PI / 2.0,
+            // Lock the sphere orientation by preventing yaw and pitch changes
+            yaw_upper_limit: Some(PI / 2.0),
+            yaw_lower_limit: Some(PI / 2.0),
+            pitch_upper_limit: Some(0.0),
+            pitch_lower_limit: Some(0.0),
+            // Disable orbit controls since we want fixed orientation
+            orbit_sensitivity: 0.0,
+            ..default()
+        },
     ));
 }
 
@@ -330,10 +345,11 @@ fn setup_ui(mut commands: Commands) {
     commands.spawn((
         Text::new(
             "Controls:\n\
-            * Left mouse drag: Orbit camera\n\
-            * Right mouse drag: Pan camera\n\
             * Mouse wheel: Zoom camera\n\
             * Left click: Select/deselect tile\n\
+            * D/A: Move left/right\n\
+            * E/Z: Move diagonally (↖/↘)\n\
+            * W/X: Move diagonally (↗/↙)\n\
             * Space: Toggle wireframe mode\n\
             * N: Toggle normal visualization\n\
             * I: Print hexasphere info\n\
@@ -432,9 +448,8 @@ fn screenshot_system(
                 .unwrap()
                 .as_secs();
 
-            // Use absolute path to repo root
-            let repo_root = "/Users/rltvty/src/github.com/rltvty/miniature-potato";
-            let filename = format!("{}/screenshot_{}.png", repo_root, timestamp);
+            // Use current directory for screenshot
+            let filename = format!("screenshot_{}.png", timestamp);
 
             println!("📸 Taking screenshot: {}", filename);
 
