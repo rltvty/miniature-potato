@@ -24,6 +24,10 @@ enum TileShape {
     Exact,
 }
 
+/// Component to mark the sphere parent entity
+#[derive(Component)]
+pub struct SphereParent;
+
 /// Resource to store the hexasphere and related data
 #[derive(Resource)]
 pub struct HexasphereResource {
@@ -31,6 +35,7 @@ pub struct HexasphereResource {
     pub thick_tiles: Vec<ThickTile>,
     pub uniform_radius: f64,
     pub tile_entities: Vec<Entity>,
+    pub sphere_parent: Entity,
     pub hovered_tile: Option<usize>,
     pub selected_tiles: HashSet<usize>,
 }
@@ -112,6 +117,7 @@ fn get_material(
 
 fn add_entity(
     commands: &mut Commands,
+    sphere_parent: Entity,
     tile_entities: &mut Vec<Entity>,
     mesh: Handle<Mesh>,
     material: Handle<StandardMaterial>,
@@ -129,6 +135,7 @@ fn add_entity(
             },
             transform,
             tile_component,
+            ChildOf(sphere_parent),
         ))
         .observe(on_tile_hover)
         .observe(on_tile_out)
@@ -171,6 +178,14 @@ pub fn setup_hexasphere_world(
         LinearRgba::rgb(0.5, 0.5, 0.0),
     ); // Yellow
 
+    // Create parent entity for the entire sphere
+    let sphere_parent = commands.spawn((
+        Transform::default(),
+        Visibility::default(),
+        SphereParent,
+    )).id();
+
+    // Create all tiles as children of the sphere parent
     match TILE_SHAPE {
         TileShape::Uniform => {
             let approximations = hexasphere.get_regular_hexagon_approximations();
@@ -191,6 +206,7 @@ pub fn setup_hexasphere_world(
 
                 add_entity(
                     &mut commands,
+                    sphere_parent,
                     &mut tile_entities,
                     mesh.clone(),
                     hexagon_material.clone(),
@@ -262,6 +278,7 @@ pub fn setup_hexasphere_world(
 
                 add_entity(
                     &mut commands,
+                    sphere_parent,
                     &mut tile_entities,
                     mesh,
                     material,
@@ -293,6 +310,7 @@ pub fn setup_hexasphere_world(
 
                 add_entity(
                     &mut commands,
+                    sphere_parent,
                     &mut tile_entities,
                     mesh,
                     material,
@@ -310,6 +328,7 @@ pub fn setup_hexasphere_world(
         thick_tiles,
         uniform_radius,
         tile_entities: tile_entities.clone(),
+        sphere_parent,
         hovered_tile: None,
         selected_tiles: HashSet::new(),
     });

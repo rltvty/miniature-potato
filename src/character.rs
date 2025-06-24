@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 use geotiles::Point;
 use crate::geotiles_bevy::HexasphereResource;
+use std::f32::consts::PI;
 
 /// Component to mark the character entity
 #[derive(Component)]
@@ -15,19 +16,18 @@ pub struct Character {
 #[derive(Resource)]
 pub struct CharacterResource {
     pub entity: Option<Entity>,
+    pub last_rotation_time: f32,
 }
 
 fn vec3_from_point(p: &Point) -> Vec3 {
     Vec3::new(p.x as f32, p.y as f32, p.z as f32)
 }
 
-/// Find the tile that is most facing the camera (with 90-degree rotation)
+/// Find the tile that is most facing the camera
 fn find_camera_facing_tile(hexasphere: &geotiles::Hexasphere) -> usize {
-    // After 90-degree yaw rotation, the camera is effectively looking from a different direction
-    // With yaw = π/2, the camera view is rotated 90 degrees around Y axis
-    // Original camera direction was looking towards -Z, now it's looking towards -X
-    // So we want the tile that faces towards +X direction (towards the rotated camera)
-    let desired_normal = Vec3::X; // After 90-degree rotation, camera sees +X face
+    // Camera is looking towards -Z direction from +Z position
+    // So we want the tile that faces towards +Z direction (towards the camera)
+    let desired_normal = Vec3::Z; // Camera sees +Z face
     
     let mut best_tile_index = 0;
     let mut best_dot_product = -2.0; // Start below -1
@@ -46,7 +46,7 @@ fn find_camera_facing_tile(hexasphere: &geotiles::Hexasphere) -> usize {
         }
     }
     
-    println!("🎯 With 90° rotation, looking for tile facing +X direction");
+    println!("🎯 Looking for tile facing +Z direction (towards camera)");
     println!("🎯 Best camera-facing tile: #{} with alignment {:.3}", best_tile_index, best_dot_product);
     println!("🎯 Selected tile center: {:?}", vec3_from_point(&hexasphere.tiles[best_tile_index].center_point));
     
@@ -155,28 +155,27 @@ pub fn handle_character_movement(
             if let Some(current_tile) = hexasphere.hexasphere.tiles.get(current_tile_index) {
                 let current_center = vec3_from_point(&current_tile.center_point);
                 
-                // With locked camera orientation (90 degrees rotated), adjust directions
-                // The sphere is rotated 90 degrees, so we need to rotate our direction vectors too
+                // With fixed camera, use standard world directions
                 let mut desired_direction: Option<Vec3> = None;
                 
                 if keyboard.just_pressed(KeyCode::KeyD) {
-                    // Left: towards negative Z (swapped from A)
-                    desired_direction = Some(-Vec3::Z);
+                    // Left: towards negative X
+                    desired_direction = Some(-Vec3::X);
                 } else if keyboard.just_pressed(KeyCode::KeyA) {
-                    // Right: towards positive Z (swapped from D)
-                    desired_direction = Some(Vec3::Z);
+                    // Right: towards positive X
+                    desired_direction = Some(Vec3::X);
                 } else if keyboard.just_pressed(KeyCode::KeyE) {
-                    // Up-left diagonal: towards +Y-Z (swapped from W)
-                    desired_direction = Some((Vec3::Y - Vec3::Z).normalize());
+                    // Up-left diagonal: towards +Y-X
+                    desired_direction = Some((Vec3::Y - Vec3::X).normalize());
                 } else if keyboard.just_pressed(KeyCode::KeyZ) {
-                    // Down-right diagonal: towards -Y+Z (swapped from X)
-                    desired_direction = Some((-Vec3::Y + Vec3::Z).normalize());
+                    // Down-right diagonal: towards -Y+X
+                    desired_direction = Some((-Vec3::Y + Vec3::X).normalize());
                 } else if keyboard.just_pressed(KeyCode::KeyW) {
-                    // Up-right diagonal: towards +Y+Z (swapped from E)
-                    desired_direction = Some((Vec3::Y + Vec3::Z).normalize());
+                    // Up-right diagonal: towards +Y+X
+                    desired_direction = Some((Vec3::Y + Vec3::X).normalize());
                 } else if keyboard.just_pressed(KeyCode::KeyX) {
-                    // Down-left diagonal: towards -Y-Z (swapped from Z)
-                    desired_direction = Some((-Vec3::Y - Vec3::Z).normalize());
+                    // Down-left diagonal: towards -Y-X
+                    desired_direction = Some((-Vec3::Y - Vec3::X).normalize());
                 }
                 
                 if let Some(direction) = desired_direction {
@@ -205,3 +204,93 @@ pub fn handle_character_movement(
         }
     }
 }
+
+/// System to rotate the sphere to keep the character centered and maintain hexagon orientation
+pub fn follow_character_with_sphere_rotation(
+    character_query: Query<(&Character, &Transform)>,
+    mut sphere_parent_query: Query<&mut Transform, (With<crate::geotiles_bevy::SphereParent>, Without<Character>)>,
+    mut character_res: ResMut<CharacterResource>,
+    time: Res<Time>,
+) {
+    if let (Ok((_character, character_transform)), Ok(mut sphere_transform)) = 
+        (character_query.single(), sphere_parent_query.single_mut()) {
+        
+        let character_position = character_transform.translation;
+        let current_time = time.elapsed_secs();
+        
+        // Add cooldown to prevent rapid successive rotations
+        let rotation_cooldown = 2.0; // 2 seconds between rotations
+        if current_time - character_res.last_rotation_time < rotation_cooldown {
+            return;
+        }
+        
+        // Get current sphere rotation (Y-axis rotation)
+        let current_yaw = sphere_transform.rotation.to_euler(EulerRot::YXZ).0;
+        
+        // Check if the character has moved far enough from center to warrant rotation
+        if should_rotate_sphere(character_position, current_yaw) {
+            println!("🎯 Character at edge, checking for sphere rotation");
+            
+            // Calculate the ideal yaw to center the character
+            if let Some(new_yaw) = calculate_ideal_yaw(character_position, current_yaw) {
+                println!("🔄 Rotating sphere from {:.1}° to {:.1}° to follow character", 
+                         current_yaw.to_degrees(), new_yaw.to_degrees());
+                
+                // Apply rotation to the sphere parent entity
+                sphere_transform.rotation = Quat::from_rotation_y(new_yaw);
+                character_res.last_rotation_time = current_time;
+            }
+        }
+    }
+}
+
+/// Check if sphere should rotate based on character position
+fn should_rotate_sphere(character_position: Vec3, current_sphere_yaw: f32) -> bool {
+    // Apply current sphere rotation to get the character's position relative to camera view
+    // Since sphere rotates around Y-axis, we need to counter-rotate to get view-relative position
+    let view_relative_position = rotate_point_around_y(-current_sphere_yaw, character_position);
+    
+    // Check if character is too far from the center of the view (X axis in view space)
+    // The camera looks down -Z, so X determines left/right position
+    let distance_from_center = view_relative_position.x.abs();
+    let forward_distance = view_relative_position.z.abs();
+    
+    // Trigger rotation if character is more than 70% of the way to the edge
+    distance_from_center > forward_distance * 0.7
+}
+
+/// Calculate the ideal sphere rotation to center the character
+fn calculate_ideal_yaw(character_position: Vec3, current_sphere_yaw: f32) -> Option<f32> {
+    // Apply current sphere rotation to get the character's position relative to camera view
+    let view_relative_position = rotate_point_around_y(-current_sphere_yaw, character_position);
+    
+    // Determine which direction to rotate the sphere based on character's X position
+    // If character is to the right (positive X), we need to rotate sphere clockwise (positive yaw)
+    // to bring the character back to center
+    let increment = PI / 12.0; // 15 degrees
+    let new_sphere_yaw = if view_relative_position.x > 0.0 {
+        // Character is to the right, rotate sphere clockwise (positive yaw)
+        current_sphere_yaw + increment
+    } else {
+        // Character is to the left, rotate sphere counter-clockwise (negative yaw)
+        current_sphere_yaw - increment
+    };
+    
+    // Normalize to 0-2π range
+    let normalized_yaw = ((new_sphere_yaw % (2.0 * PI)) + 2.0 * PI) % (2.0 * PI);
+    
+    Some(normalized_yaw)
+}
+
+/// Rotate a point around the Y axis by the given angle
+fn rotate_point_around_y(angle: f32, point: Vec3) -> Vec3 {
+    let cos_a = angle.cos();
+    let sin_a = angle.sin();
+    
+    Vec3::new(
+        point.x * cos_a - point.z * sin_a,
+        point.y,
+        point.x * sin_a + point.z * cos_a,
+    )
+}
+

@@ -13,7 +13,7 @@ use miniature_potato::geotiles_bevy::{
     handle_tile_selection, setup_hexasphere_world, tile_gizmos_system, toggle_normals,
     HexasphereResource,
 };
-use miniature_potato::character::{setup_character, handle_character_movement, CharacterResource};
+use miniature_potato::character::{setup_character, handle_character_movement, follow_character_with_sphere_rotation, CharacterResource};
 use std::env;
 
 /// Resource to track screenshot timing
@@ -80,7 +80,10 @@ fn main() {
     ));
 
     // Initialize character resource
-    app.insert_resource(CharacterResource { entity: None });
+    app.insert_resource(CharacterResource { 
+        entity: None,
+        last_rotation_time: 0.0,
+    });
 
     app.add_systems(
         Startup,
@@ -103,6 +106,7 @@ fn main() {
             print_tile_info,
             handle_tile_selection,
             handle_character_movement,
+            follow_character_with_sphere_rotation.after(handle_character_movement),
             tile_gizmos_system,
             update_hovered_tile_ui,
             update_selected_tile_ui,
@@ -288,20 +292,17 @@ struct SelectedTileText;
 struct SphereInfoText;
 
 fn setup_camera(mut commands: Commands) {
-    use std::f32::consts::PI;
-    
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, 15.0, 5.0)),
         PanOrbitCamera {
-            // Start with 90 degree rotation for horizontal tile alignment
-            yaw: Some(PI / 2.0), // 90 degrees in radians
-            target_yaw: PI / 2.0,
-            // Lock the sphere orientation by preventing yaw and pitch changes
-            yaw_upper_limit: Some(PI / 2.0),
-            yaw_lower_limit: Some(PI / 2.0),
+            // Fixed camera position looking at the sphere
+            // Sphere rotation will handle keeping character centered
+            yaw: Some(0.0),
+            target_yaw: 0.0,
+            // Keep pitch locked to maintain view angle
             pitch_upper_limit: Some(0.0),
             pitch_lower_limit: Some(0.0),
-            // Disable orbit controls since we want fixed orientation
+            // Disable manual orbit controls since sphere handles rotation
             orbit_sensitivity: 0.0,
             ..default()
         },
