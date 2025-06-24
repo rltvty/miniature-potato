@@ -1,6 +1,6 @@
 //! Character system for the miniature-potato game
 
-use bevy::prelude::*;
+use bevy::{color::palettes::css::{BLUE, DARK_CYAN, MAGENTA, PINK, RED}, prelude::*};
 use geotiles::Point;
 use crate::geotiles_bevy::HexasphereResource;
 use std::f32::consts::PI;
@@ -233,190 +233,17 @@ pub fn update_dead_zone_state(
         
         let character_position = character_transform.translation;
         
-        // Check if the character is outside the dead zone
-        let is_outside = should_rotate_sphere_3d(character_position, world_transform);
+        // // Check if the character is outside the dead zone
+        // let is_outside = should_rotate_sphere_3d(character_position, world_transform);
         
-        // Update the debug state for consistent gizmo coloring
-        debug_gizmos.character_outside_dead_zone = is_outside;
+        // // Update the debug state for consistent gizmo coloring
+        // debug_gizmos.character_outside_dead_zone = is_outside;
     }
 }
 
-/// System to rotate the world to keep the character centered and maintain hexagon orientation
-pub fn follow_character_with_sphere_rotation(
-    character_query: Query<(&Character, &Transform)>,
-    mut world_parent_query: Query<&mut Transform, (With<crate::geotiles_bevy::WorldParent>, Without<Character>)>,
-) {
-    if let (Ok((_character, character_transform)), Ok(mut world_transform)) = 
-        (character_query.single(), world_parent_query.single_mut()) {
-        
-        let character_position = character_transform.translation;
-        
-        // Check if the character has moved far enough from center to warrant rotation
-        let is_outside = should_rotate_sphere_3d(character_position, &world_transform);
-        
-        if is_outside {
-            println!("🎯 Character outside dead zone, rotating world to center");
-            
-            // Calculate the ideal 3D rotation to center the character
-            if let Some(new_rotation) = calculate_ideal_3d_rotation(character_position, &world_transform) {
-                let old_euler = world_transform.rotation.to_euler(EulerRot::YXZ);
-                let new_euler = new_rotation.to_euler(EulerRot::YXZ);
-                
-                println!("🔄 Rotating world 3D: old({:.1}°,{:.1}°,{:.1}°) -> new({:.1}°,{:.1}°,{:.1}°)", 
-                         old_euler.0.to_degrees(), old_euler.1.to_degrees(), old_euler.2.to_degrees(),
-                         new_euler.0.to_degrees(), new_euler.1.to_degrees(), new_euler.2.to_degrees());
-                
-                // Apply 3D rotation to the world parent entity
-                world_transform.rotation = new_rotation;
-            }
-        }
-    }
-}
 
-/// Check if world should rotate based on character position using dead zone
-fn should_rotate_sphere(character_position: Vec3, current_world_yaw: f32) -> bool {
-    // Calculate the character's view-relative position by transforming by current world rotation
-    let view_relative_position = rotate_point_around_y(-current_world_yaw, character_position);
-    
-    // The character is on the sphere surface. We want to calculate how far off-center it appears
-    // from the camera's perspective. Since camera looks down -Z, we use X and Y coordinates
-    // to determine the angular distance from center.
-    
-    // Calculate the 2D distance from camera center (X-Y plane) 
-    let distance_from_center_2d = (view_relative_position.x.powi(2) + view_relative_position.y.powi(2)).sqrt();
-    let distance_to_character = view_relative_position.length();
-    
-    // Calculate the angular distance using trigonometry
-    // The angle is based on how far the character appears from the center in the camera view
-    let angle_from_center = (distance_from_center_2d / distance_to_character).asin();
-    let angle_degrees = angle_from_center.to_degrees();
-    
-    // Define dead zone: 20 degree radius from camera center
-    let dead_zone_degrees = 20.0;
-    let is_in_dead_zone = angle_degrees <= dead_zone_degrees;
-    
-    // Debug output
-    println!("🔍 Dead zone check: char_pos=({:.2},{:.2},{:.2}) world_yaw={:.1}°", 
-             character_position.x, character_position.y, character_position.z, current_world_yaw.to_degrees());
-    println!("🔍 View relative: ({:.2},{:.2},{:.2}) | 2D distance: {:.2} | 3D distance: {:.2}", 
-             view_relative_position.x, view_relative_position.y, view_relative_position.z,
-             distance_from_center_2d, distance_to_character);
-    println!("🔍 Angle from camera center: {:.1}° | Dead zone: {:.1}° | In dead zone: {} | Should rotate: {}", 
-             angle_degrees, dead_zone_degrees, is_in_dead_zone, !is_in_dead_zone);
-    
-    // Only rotate if character is outside the dead zone
-    !is_in_dead_zone
-}
 
-/// Check if world should rotate based on character position using 3D dead zone
-fn should_rotate_sphere_3d(character_position: Vec3, world_transform: &Transform) -> bool {
-    use crate::character_math;
-    
-    let dead_zone_angle = 20.0_f32.to_radians();
-    
-    // Use the tested mathematical approach
-    let is_outside = character_math::is_outside_dead_zone(
-        character_position, 
-        world_transform.rotation, 
-        dead_zone_angle
-    );
-    
-    // Only print debug output when character is outside dead zone
-    if is_outside {
-        let view_relative_position = world_transform.rotation.inverse() * character_position;
-        let distance_from_center_2d = (view_relative_position.x.powi(2) + view_relative_position.y.powi(2)).sqrt();
-        let distance_to_character = view_relative_position.length();
-        let angle_degrees = (distance_from_center_2d / distance_to_character).asin().to_degrees();
-        
-        println!("🔍 3D Dead zone check: char_pos=({:.2},{:.2},{:.2})", 
-                 character_position.x, character_position.y, character_position.z);
-        println!("🔍 View relative: ({:.2},{:.2},{:.2}) | 2D distance: {:.2} | 3D distance: {:.2}", 
-                 view_relative_position.x, view_relative_position.y, view_relative_position.z,
-                 distance_from_center_2d, distance_to_character);
-        println!("🔍 Angle from camera center: {:.1}° | Dead zone: 20.0° | In dead zone: {} | Should rotate: {}", 
-                 angle_degrees, false, is_outside);
-    }
-    
-    is_outside
-}
 
-/// Calculate the ideal 3D rotation to bring character back into dead zone
-fn calculate_ideal_3d_rotation(character_position: Vec3, world_transform: &Transform) -> Option<Quat> {
-    use crate::character_math;
-    
-    let dead_zone_angle = 20.0_f32.to_radians();
-    
-    // Use the tested mathematical approach
-    if let Some(new_rotation) = character_math::calculate_centering_rotation(
-        character_position, 
-        world_transform.rotation, 
-        dead_zone_angle
-    ) {
-        // Calculate view position for debug output
-        let view_relative_position = world_transform.rotation.inverse() * character_position;
-        let distance_from_center_2d = (view_relative_position.x.powi(2) + view_relative_position.y.powi(2)).sqrt();
-        
-        println!("🎯 3D Centering rotation: offset=({:.2},{:.2}) distance={:.3} axis={} amount=1.0°", 
-                 view_relative_position.x, view_relative_position.y, distance_from_center_2d,
-                 if view_relative_position.y.abs() > view_relative_position.x.abs() { "X" } else { "Y" });
-        
-        Some(new_rotation)
-    } else {
-        println!("🎯 Character close enough to center, no rotation needed");
-        None
-    }
-}
-
-/// Calculate the ideal world rotation to bring character back into dead zone
-fn calculate_ideal_yaw(character_position: Vec3, current_world_yaw: f32) -> Option<f32> {
-    // Apply current world rotation to get the character's position relative to camera view
-    let view_relative_position = rotate_point_around_y(-current_world_yaw, character_position);
-    
-    // Calculate the angle needed to bring character back toward camera center
-    // We want to rotate the world so the character appears closer to the -Z axis (camera forward)
-    let char_horizontal_distance = (view_relative_position.x.powi(2) + view_relative_position.z.powi(2)).sqrt();
-    
-    if char_horizontal_distance < 0.001 {
-        return None; // Character is essentially at center, no rotation needed
-    }
-    
-    // Calculate the angle the character is at relative to camera forward (-Z)
-    let _current_angle = view_relative_position.z.atan2(view_relative_position.x);
-    
-    // We want to rotate to bring the character closer to the dead zone center
-    // Small incremental rotation toward center
-    let rotation_increment = PI / 24.0; // 7.5 degrees - smaller increments for smoother movement
-    
-    // Determine rotation direction to bring character toward center
-    let new_world_yaw = if view_relative_position.x > 0.0 {
-        // Character is to the right, rotate world LEFT (negative yaw) to center them
-        current_world_yaw - rotation_increment
-    } else {
-        // Character is to the left, rotate world RIGHT (positive yaw) to center them
-        current_world_yaw + rotation_increment
-    };
-    
-    // Normalize to 0-2π range
-    let normalized_yaw = ((new_world_yaw % (2.0 * PI)) + 2.0 * PI) % (2.0 * PI);
-    
-    println!("🎯 Centering rotation: char at ({:.2},{:.2}) -> rotating from {:.1}° to {:.1}°", 
-             view_relative_position.x, view_relative_position.z, 
-             current_world_yaw.to_degrees(), normalized_yaw.to_degrees());
-    
-    Some(normalized_yaw)
-}
-
-/// Rotate a point around the Y axis by the given angle
-fn rotate_point_around_y(angle: f32, point: Vec3) -> Vec3 {
-    let cos_a = angle.cos();
-    let sin_a = angle.sin();
-    
-    Vec3::new(
-        point.x * cos_a - point.z * sin_a,
-        point.y,
-        point.x * sin_a + point.z * cos_a,
-    )
-}
 
 /// Draw the dead zone as a circle in screen space with state-based coloring
 fn draw_dead_zone_gizmo(
@@ -429,53 +256,14 @@ fn draw_dead_zone_gizmo(
     let dead_zone_degrees: f32 = 20.0;
     let dead_zone_radius = sphere_radius * (dead_zone_degrees.to_radians()).sin();
     
-    // Draw circle on the front face of the sphere (at z = sphere_radius)
-    let circle_center = Vec3::new(0.0, 0.0, sphere_radius);
-    
     // Use the stored state from the rotation system for consistent coloring
     let circle_color = if debug_gizmos.character_outside_dead_zone {
-        Color::srgb(0.0, 0.5, 1.0) // Blue when character is outside dead zone
+        BLUE // Blue when character is outside dead zone
     } else {
-        Color::srgb(1.0, 0.0, 1.0) // Magenta when character is inside dead zone
+        MAGENTA // Magenta when character is inside dead zone
     };
-    
-    // Draw the dead zone circle with thick lines
-    let circle_resolution = 64; // More segments for smoother circle
-    for i in 0..circle_resolution {
-        let angle1 = (i as f32 / circle_resolution as f32) * 2.0 * PI;
-        let angle2 = ((i + 1) as f32 / circle_resolution as f32) * 2.0 * PI;
-        
-        let point1 = circle_center + Vec3::new(
-            dead_zone_radius * angle1.cos(),
-            dead_zone_radius * angle1.sin(),
-            0.0
-        );
-        let point2 = circle_center + Vec3::new(
-            dead_zone_radius * angle2.cos(),
-            dead_zone_radius * angle2.sin(),
-            0.0
-        );
-        
-        gizmos.line(point1, point2, circle_color);
-    }
-    
-    // Draw crosshairs for center reference
-    let crosshair_size = dead_zone_radius * 0.3;
-    
-    // Main crosshairs
-    gizmos.line(
-        circle_center + Vec3::new(-crosshair_size, 0.0, 0.0),
-        circle_center + Vec3::new(crosshair_size, 0.0, 0.0),
-        Color::srgb(1.0, 1.0, 0.0) // Yellow crosshair
-    );
-    gizmos.line(
-        circle_center + Vec3::new(0.0, -crosshair_size, 0.0),
-        circle_center + Vec3::new(0.0, crosshair_size, 0.0),
-        Color::srgb(1.0, 1.0, 0.0) // Yellow crosshair
-    );
-    
-    // Center dot for visibility
-    gizmos.sphere(circle_center, 0.05, Color::srgb(1.0, 1.0, 0.0)); // Yellow center dot
+
+    gizmos.circle(Isometry3d::from_xyz(0.0, 0.0, sphere_radius), dead_zone_radius, circle_color);
 }
 
 /// Draw debug ray from camera to character
@@ -485,74 +273,16 @@ fn draw_camera_ray_gizmo(
     world_transform: &Transform,
 ) {
     // Camera position in world space (always at origin)
-    let camera_pos = Vec3::ZERO;
+    let camera_pos = Vec3::new(0.0, 0.0, 15.0);
     
     // Character position is already in local space, transform to world space
     let world_character_pos = world_transform.transform_point(character_position);
     
     // Draw larger sphere at camera position for visibility
     gizmos.sphere(camera_pos, 0.3, Color::srgb(1.0, 1.0, 1.0)); // Large white camera dot
-    
-    // Draw large sphere at character position for visibility 
-    gizmos.sphere(world_character_pos, 0.2, Color::srgb(0.0, 1.0, 0.0)); // Green character dot
-    
-    // Only draw ray if character is not exactly at camera position
-    let ray_length = (world_character_pos - camera_pos).length();
-    if ray_length > 0.1 {
-        // Draw multiple thick rays to make it very visible
-        let ray_color = Color::srgb(1.0, 0.0, 0.0); // Bright red ray
-        
-        // Draw main ray
-        gizmos.line(camera_pos, world_character_pos, ray_color);
-        
-        // Draw parallel rays for thickness
-        let offset = 0.1;
-        let perpendicular1 = Vec3::new(offset, 0.0, 0.0);
-        let perpendicular2 = Vec3::new(0.0, offset, 0.0);
-        
-        gizmos.line(camera_pos + perpendicular1, world_character_pos + perpendicular1, ray_color);
-        gizmos.line(camera_pos - perpendicular1, world_character_pos - perpendicular1, ray_color);
-        gizmos.line(camera_pos + perpendicular2, world_character_pos + perpendicular2, ray_color);
-        gizmos.line(camera_pos - perpendicular2, world_character_pos - perpendicular2, ray_color);
-        
-        // Draw many spheres along the ray to make it more visible
-        for i in 1..10 {
-            let t = i as f32 / 10.0;
-            let point_on_ray = camera_pos + (world_character_pos - camera_pos) * t;
-            gizmos.sphere(point_on_ray, 0.08, ray_color);
-        }
-        
-        // Calculate where the camera-to-character ray intersects the dead zone plane
-        let sphere_radius = 5.0;
-        let dead_zone_plane_z = sphere_radius; // Front face of sphere
-        
-        // Ray direction from camera to character
-        let ray_direction = (world_character_pos - camera_pos).normalize();
-        
-        // Find intersection with plane at z = sphere_radius
-        if ray_direction.z.abs() > 0.001 { // Avoid division by zero
-            let t = dead_zone_plane_z / ray_direction.z;
-            if t > 0.0 { // Only if intersection is in front of camera
-                let intersection_point = camera_pos + ray_direction * t;
-                
-                // Draw large intersection point
-                gizmos.sphere(intersection_point, 0.25, Color::srgb(1.0, 1.0, 0.0)); // Large yellow intersection dot
-                
-                // Draw crosshairs at intersection
-                let cross_size = 0.5;
-                gizmos.line(
-                    intersection_point + Vec3::new(-cross_size, 0.0, 0.0),
-                    intersection_point + Vec3::new(cross_size, 0.0, 0.0),
-                    Color::srgb(1.0, 1.0, 0.0)
-                );
-                gizmos.line(
-                    intersection_point + Vec3::new(0.0, -cross_size, 0.0),
-                    intersection_point + Vec3::new(0.0, cross_size, 0.0),
-                    Color::srgb(1.0, 1.0, 0.0)
-                );
-            }
-        }
-    }
+
+    // Draw arrow from camera to character
+    gizmos.arrow(camera_pos, world_character_pos, DARK_CYAN);
 }
 
 /// System to draw debug gizmos for sphere and character coordinate systems
@@ -596,9 +326,9 @@ pub fn debug_gizmos_system(
         let z_axis = sphere_rotation * Vec3::Z * axis_length;
         
         // Draw sphere axes - Red=X, Green=Y, Blue=Z with bold lines
-        gizmos.line_gradient(sphere_center, sphere_center + x_axis, Color::srgb(1.0, 0.0, 0.0), Color::srgb(1.0, 0.0, 0.0)); // Red X
-        gizmos.line_gradient(sphere_center, sphere_center + y_axis, Color::srgb(0.0, 1.0, 0.0), Color::srgb(0.0, 1.0, 0.0)); // Green Y
-        gizmos.line_gradient(sphere_center, sphere_center + z_axis, Color::srgb(0.0, 0.0, 1.0), Color::srgb(0.0, 0.0, 1.0)); // Blue Z
+        gizmos.line(sphere_center, sphere_center + x_axis, Color::srgb(1.0, 0.0, 0.0)); // Red X
+        gizmos.line(sphere_center, sphere_center + y_axis, Color::srgb(0.0, 1.0, 0.0)); // Green Y
+        gizmos.line(sphere_center, sphere_center + z_axis, Color::srgb(0.0, 0.0, 1.0)); // Blue Z
         
         // Add axis labels using small spheres
         gizmos.sphere(sphere_center + x_axis, 0.2, Color::srgb(1.0, 0.0, 0.0)); // Red X end
@@ -607,25 +337,11 @@ pub fn debug_gizmos_system(
     }
     
     // Draw character axes (smaller scale, local to character) if we have the transforms
-    if let (Ok(world_transform), Ok((_character, character_transform))) = 
+    if let (Ok(_world_transform), Ok((_character, character_transform))) = 
         (world_parent_query.single(), character_query.single()) {
         
-        // Transform character position and rotation to world space
-        let world_character_position = world_transform.transform_point(character_transform.translation);
-        let world_character_rotation = world_transform.rotation * character_transform.rotation;
-        
-        // Draw character local axes with smaller scale
-        let char_axis_length = 0.5;
-        
-        // Transform standard axes by world character rotation
-        let char_x_axis = world_character_rotation * Vec3::X * char_axis_length;
-        let char_y_axis = world_character_rotation * Vec3::Y * char_axis_length;
-        let char_z_axis = world_character_rotation * Vec3::Z * char_axis_length;
-        
-        // Draw character axes - Lighter colors to distinguish from sphere axes with bold lines
-        gizmos.line_gradient(world_character_position, world_character_position + char_x_axis, Color::srgb(1.0, 0.5, 0.5), Color::srgb(1.0, 0.5, 0.5)); // Light Red X
-        gizmos.line_gradient(world_character_position, world_character_position + char_y_axis, Color::srgb(0.5, 1.0, 0.5), Color::srgb(0.5, 1.0, 0.5)); // Light Green Y
-        gizmos.line_gradient(world_character_position, world_character_position + char_z_axis, Color::srgb(0.5, 0.5, 1.0), Color::srgb(0.5, 0.5, 1.0)); // Light Blue Z
+
+        gizmos.axes(*character_transform, 0.75);
     }
     
     // Draw fixed camera/world coordinate system for reference (always at origin)

@@ -13,7 +13,7 @@ use miniature_potato::geotiles_bevy::{
     handle_tile_selection, setup_hexasphere_world, tile_gizmos_system, toggle_normals,
     HexasphereResource, WorldParent,
 };
-use miniature_potato::character::{setup_character, handle_character_movement, follow_character_with_sphere_rotation, update_dead_zone_state, debug_gizmos_system, toggle_debug_gizmos, CharacterResource, DebugGizmosResource, Character, find_neighbor_in_direction, vec3_from_point};
+use miniature_potato::character::{setup_character, handle_character_movement, update_dead_zone_state, debug_gizmos_system, toggle_debug_gizmos, CharacterResource, DebugGizmosResource, Character, find_neighbor_in_direction, vec3_from_point};
 use serde::Deserialize;
 use std::env;
 use std::fs;
@@ -260,8 +260,6 @@ fn main() {
             print_tile_info,
             handle_tile_selection,
             handle_character_movement,
-            follow_character_with_sphere_rotation.after(handle_character_movement),
-            update_dead_zone_state.after(follow_character_with_sphere_rotation),
             tile_gizmos_system,
             debug_gizmos_system.after(update_dead_zone_state),
             toggle_debug_gizmos,
@@ -450,7 +448,7 @@ struct SphereInfoText;
 
 fn setup_camera(mut commands: Commands) {
     commands.spawn((
-        Transform::from_translation(Vec3::new(0.0, 15.0, 5.0)),
+        Transform::from_translation(Vec3::new(0.0, 15.0, 0.0)),
         PanOrbitCamera {
             // Fixed camera position looking at the sphere
             // Sphere rotation will handle keeping character centered
