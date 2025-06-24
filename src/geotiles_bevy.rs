@@ -24,6 +24,10 @@ enum TileShape {
     Exact,
 }
 
+/// Component to mark the grand parent entity (contains both sphere and character)
+#[derive(Component)]
+pub struct WorldParent;
+
 /// Component to mark the sphere parent entity
 #[derive(Component)]
 pub struct SphereParent;
@@ -35,6 +39,7 @@ pub struct HexasphereResource {
     pub thick_tiles: Vec<ThickTile>,
     pub uniform_radius: f64,
     pub tile_entities: Vec<Entity>,
+    pub world_parent: Entity,
     pub sphere_parent: Entity,
     pub hovered_tile: Option<usize>,
     pub selected_tiles: HashSet<usize>,
@@ -178,11 +183,19 @@ pub fn setup_hexasphere_world(
         LinearRgba::rgb(0.5, 0.5, 0.0),
     ); // Yellow
 
-    // Create parent entity for the entire sphere
+    // Create grand parent entity for the entire world (sphere + character)
+    let world_parent = commands.spawn((
+        Transform::default(),
+        Visibility::default(),
+        WorldParent,
+    )).id();
+
+    // Create sphere parent entity as child of world parent
     let sphere_parent = commands.spawn((
         Transform::default(),
         Visibility::default(),
         SphereParent,
+        ChildOf(world_parent),
     )).id();
 
     // Create all tiles as children of the sphere parent
@@ -328,6 +341,7 @@ pub fn setup_hexasphere_world(
         thick_tiles,
         uniform_radius,
         tile_entities: tile_entities.clone(),
+        world_parent,
         sphere_parent,
         hovered_tile: None,
         selected_tiles: HashSet::new(),

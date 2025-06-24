@@ -348,9 +348,7 @@ fn setup_ui(mut commands: Commands) {
             "Controls:\n\
             * Mouse wheel: Zoom camera\n\
             * Left click: Select/deselect tile\n\
-            * D/A: Move left/right\n\
-            * E/Z: Move diagonally (↖/↘)\n\
-            * W/X: Move diagonally (↗/↙)\n\
+            * WASD: Move character\n\
             * Space: Toggle wireframe mode\n\
             * N: Toggle normal visualization\n\
             * I: Print hexasphere info\n\

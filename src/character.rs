@@ -76,7 +76,7 @@ pub fn setup_character(
             println!("🧍 Spawning character at camera-facing {} tile #{}: {:?}", 
                      tile_type, camera_facing_tile_index, character_position);
             
-            // Create blue sphere for character
+            // Create blue sphere for character as child of world parent
             let character_entity = commands.spawn((
                 Mesh3d(meshes.add(Sphere::new(0.1))), // Small blue sphere
                 MeshMaterial3d(materials.add(StandardMaterial {
@@ -90,6 +90,7 @@ pub fn setup_character(
                     current_tile: camera_facing_tile_index,
                     hover_height,
                 },
+                ChildOf(hexasphere.world_parent),
             )).id();
             
             // Store character entity in resource
@@ -109,19 +110,18 @@ fn find_neighbor_in_direction(
     current_tile: &geotiles::Tile,
     desired_direction: Vec3,
     hexasphere: &geotiles::Hexasphere,
+    world_transform: &Transform,
 ) -> Option<usize> {
-    let current_center = vec3_from_point(&current_tile.center_point);
+    // Transform tile centers to world space to account for world rotation
+    let local_current_center = vec3_from_point(&current_tile.center_point);
+    let current_center = world_transform.transform_point(local_current_center);
     let mut best_neighbor = None;
     let mut best_dot_product = -2.0; // Start below -1 to ensure we find something
     
     for &neighbor_index in &current_tile.neighbors {
         if let Some(neighbor_tile) = hexasphere.tiles.get(neighbor_index) {
-            // Skip pentagons for now
-            if neighbor_tile.boundary.len() == 5 {
-                continue;
-            }
-            
-            let neighbor_center = vec3_from_point(&neighbor_tile.center_point);
+            let local_neighbor_center = vec3_from_point(&neighbor_tile.center_point);
+            let neighbor_center = world_transform.transform_point(local_neighbor_center);
             
             // Calculate direction from current tile to neighbor (on sphere surface)
             let to_neighbor = neighbor_center - current_center;
@@ -140,64 +140,74 @@ fn find_neighbor_in_direction(
     best_neighbor
 }
 
-/// System to handle character movement using simplified directional controls
-/// With locked camera orientation: A/D = left/right, W/X = one diagonal, E/Z = other diagonal
+/// System to handle character movement using camera-relative WASD controls
 pub fn handle_character_movement(
     keyboard: Res<ButtonInput<KeyCode>>,
     hexasphere_res: Option<Res<HexasphereResource>>,
+    world_parent_query: Query<&Transform, (With<crate::geotiles_bevy::WorldParent>, Without<Character>)>,
     mut character_query: Query<(&mut Character, &mut Transform)>,
 ) {
     if let Some(hexasphere) = hexasphere_res {
-        if let Ok((mut character, mut transform)) = character_query.single_mut() {
+        if let (Ok((mut character, mut transform)), Ok(world_transform)) = 
+            (character_query.single_mut(), world_parent_query.single()) {
+            
             let current_tile_index = character.current_tile;
             
             // Get current tile
             if let Some(current_tile) = hexasphere.hexasphere.tiles.get(current_tile_index) {
-                let current_center = vec3_from_point(&current_tile.center_point);
+                // Get tile center and transform it by world rotation to get actual world position
+                let local_center = vec3_from_point(&current_tile.center_point);
+                let current_center = world_transform.transform_point(local_center);
                 
-                // With fixed camera, use standard world directions
-                let mut desired_direction: Option<Vec3> = None;
+                // Define movement directions in camera space (camera looks down -Z)
+                let mut camera_relative_direction: Option<Vec3> = None;
                 
-                if keyboard.just_pressed(KeyCode::KeyD) {
-                    // Left: towards negative X
-                    desired_direction = Some(-Vec3::X);
+                if keyboard.just_pressed(KeyCode::KeyW) {
+                    // Forward (away from camera)
+                    camera_relative_direction = Some(-Vec3::Z);
+                } else if keyboard.just_pressed(KeyCode::KeyS) {
+                    // Backward (toward camera)
+                    camera_relative_direction = Some(Vec3::Z);
                 } else if keyboard.just_pressed(KeyCode::KeyA) {
-                    // Right: towards positive X
-                    desired_direction = Some(Vec3::X);
-                } else if keyboard.just_pressed(KeyCode::KeyE) {
-                    // Up-left diagonal: towards +Y-X
-                    desired_direction = Some((Vec3::Y - Vec3::X).normalize());
-                } else if keyboard.just_pressed(KeyCode::KeyZ) {
-                    // Down-right diagonal: towards -Y+X
-                    desired_direction = Some((-Vec3::Y + Vec3::X).normalize());
-                } else if keyboard.just_pressed(KeyCode::KeyW) {
-                    // Up-right diagonal: towards +Y+X
-                    desired_direction = Some((Vec3::Y + Vec3::X).normalize());
-                } else if keyboard.just_pressed(KeyCode::KeyX) {
-                    // Down-left diagonal: towards -Y-X
-                    desired_direction = Some((-Vec3::Y - Vec3::X).normalize());
+                    // Left
+                    camera_relative_direction = Some(-Vec3::X);
+                } else if keyboard.just_pressed(KeyCode::KeyD) {
+                    // Right
+                    camera_relative_direction = Some(Vec3::X);
                 }
                 
-                if let Some(direction) = desired_direction {
+                if let Some(camera_direction) = camera_relative_direction {
+                    // Use camera direction directly in world space - don't apply world rotation
+                    // This keeps WASD movement consistent relative to camera view regardless of world rotation
+                    let world_direction = camera_direction;
+                    
                     // Project the desired direction onto the sphere's tangent plane at current position
-                    // This ensures we move along the sphere surface rather than through it
                     let normal = current_center.normalize(); // Surface normal at current position
-                    let tangent_direction = (direction - normal * direction.dot(normal)).normalize();
+                    let tangent_direction = (world_direction - normal * world_direction.dot(normal)).normalize();
                     
                     // Find the neighbor that best matches this direction
-                    if let Some(target_tile_index) = find_neighbor_in_direction(current_tile, tangent_direction, &hexasphere.hexasphere) {
+                    if let Some(target_tile_index) = find_neighbor_in_direction(current_tile, tangent_direction, &hexasphere.hexasphere, world_transform) {
                         if let Some(target_tile) = hexasphere.hexasphere.tiles.get(target_tile_index) {
-                            let target_center = vec3_from_point(&target_tile.center_point);
+                            // Transform target tile center to world space
+                            let local_target_center = vec3_from_point(&target_tile.center_point);
+                            let target_center = world_transform.transform_point(local_target_center);
                             let new_position = target_center + target_center.normalize() * character.hover_height;
                             
+                            // Convert world position back to local space relative to world parent
+                            // Create inverse transform manually
+                            let inv_rotation = world_transform.rotation.inverse();
+                            let inv_translation = inv_rotation * (-world_transform.translation);
+                            let local_position = inv_rotation * new_position + inv_translation;
+                            
                             // Update character position and current tile
-                            transform.translation = new_position;
+                            transform.translation = local_position;
                             character.current_tile = target_tile_index;
                             
-                            println!("🚶 Character moved to hexagon tile #{}", target_tile_index);
+                            let tile_type = if target_tile.boundary.len() == 5 { "pentagon" } else { "hexagon" };
+                            println!("🚶 Character moved to {} tile #{}", tile_type, target_tile_index);
                         }
                     } else {
-                        println!("🚫 No valid hexagon neighbor found in that direction");
+                        println!("🚫 No valid neighbor found in that direction");
                     }
                 }
             }
@@ -205,15 +215,15 @@ pub fn handle_character_movement(
     }
 }
 
-/// System to rotate the sphere to keep the character centered and maintain hexagon orientation
+/// System to rotate the world to keep the character centered and maintain hexagon orientation
 pub fn follow_character_with_sphere_rotation(
     character_query: Query<(&Character, &Transform)>,
-    mut sphere_parent_query: Query<&mut Transform, (With<crate::geotiles_bevy::SphereParent>, Without<Character>)>,
+    mut world_parent_query: Query<&mut Transform, (With<crate::geotiles_bevy::WorldParent>, Without<Character>)>,
     mut character_res: ResMut<CharacterResource>,
     time: Res<Time>,
 ) {
-    if let (Ok((_character, character_transform)), Ok(mut sphere_transform)) = 
-        (character_query.single(), sphere_parent_query.single_mut()) {
+    if let (Ok((_character, character_transform)), Ok(mut world_transform)) = 
+        (character_query.single(), world_parent_query.single_mut()) {
         
         let character_position = character_transform.translation;
         let current_time = time.elapsed_secs();
@@ -224,31 +234,31 @@ pub fn follow_character_with_sphere_rotation(
             return;
         }
         
-        // Get current sphere rotation (Y-axis rotation)
-        let current_yaw = sphere_transform.rotation.to_euler(EulerRot::YXZ).0;
+        // Get current world rotation (Y-axis rotation)
+        let current_yaw = world_transform.rotation.to_euler(EulerRot::YXZ).0;
         
         // Check if the character has moved far enough from center to warrant rotation
         if should_rotate_sphere(character_position, current_yaw) {
-            println!("🎯 Character at edge, checking for sphere rotation");
+            println!("🎯 Character at edge, checking for world rotation");
             
             // Calculate the ideal yaw to center the character
             if let Some(new_yaw) = calculate_ideal_yaw(character_position, current_yaw) {
-                println!("🔄 Rotating sphere from {:.1}° to {:.1}° to follow character", 
+                println!("🔄 Rotating world from {:.1}° to {:.1}° to follow character", 
                          current_yaw.to_degrees(), new_yaw.to_degrees());
                 
-                // Apply rotation to the sphere parent entity
-                sphere_transform.rotation = Quat::from_rotation_y(new_yaw);
+                // Apply rotation to the world parent entity (both sphere and character will rotate)
+                world_transform.rotation = Quat::from_rotation_y(new_yaw);
                 character_res.last_rotation_time = current_time;
             }
         }
     }
 }
 
-/// Check if sphere should rotate based on character position
-fn should_rotate_sphere(character_position: Vec3, current_sphere_yaw: f32) -> bool {
-    // Apply current sphere rotation to get the character's position relative to camera view
-    // Since sphere rotates around Y-axis, we need to counter-rotate to get view-relative position
-    let view_relative_position = rotate_point_around_y(-current_sphere_yaw, character_position);
+/// Check if world should rotate based on character position
+fn should_rotate_sphere(character_position: Vec3, current_world_yaw: f32) -> bool {
+    // Apply current world rotation to get the character's position relative to camera view
+    // Since world rotates around Y-axis, we need to counter-rotate to get view-relative position
+    let view_relative_position = rotate_point_around_y(-current_world_yaw, character_position);
     
     // Check if character is too far from the center of the view (X axis in view space)
     // The camera looks down -Z, so X determines left/right position
@@ -259,25 +269,25 @@ fn should_rotate_sphere(character_position: Vec3, current_sphere_yaw: f32) -> bo
     distance_from_center > forward_distance * 0.7
 }
 
-/// Calculate the ideal sphere rotation to center the character
-fn calculate_ideal_yaw(character_position: Vec3, current_sphere_yaw: f32) -> Option<f32> {
-    // Apply current sphere rotation to get the character's position relative to camera view
-    let view_relative_position = rotate_point_around_y(-current_sphere_yaw, character_position);
+/// Calculate the ideal world rotation to center the character
+fn calculate_ideal_yaw(character_position: Vec3, current_world_yaw: f32) -> Option<f32> {
+    // Apply current world rotation to get the character's position relative to camera view
+    let view_relative_position = rotate_point_around_y(-current_world_yaw, character_position);
     
-    // Determine which direction to rotate the sphere based on character's X position
-    // If character is to the right (positive X), we need to rotate sphere clockwise (positive yaw)
+    // Determine which direction to rotate the world based on character's X position
+    // If character is to the right (positive X), we need to rotate world LEFT (negative yaw)
     // to bring the character back to center
     let increment = PI / 12.0; // 15 degrees
-    let new_sphere_yaw = if view_relative_position.x > 0.0 {
-        // Character is to the right, rotate sphere clockwise (positive yaw)
-        current_sphere_yaw + increment
+    let new_world_yaw = if view_relative_position.x > 0.0 {
+        // Character is to the right, rotate world LEFT (negative yaw)
+        current_world_yaw - increment
     } else {
-        // Character is to the left, rotate sphere counter-clockwise (negative yaw)
-        current_sphere_yaw - increment
+        // Character is to the left, rotate world RIGHT (positive yaw)
+        current_world_yaw + increment
     };
     
     // Normalize to 0-2π range
-    let normalized_yaw = ((new_sphere_yaw % (2.0 * PI)) + 2.0 * PI) % (2.0 * PI);
+    let normalized_yaw = ((new_world_yaw % (2.0 * PI)) + 2.0 * PI) % (2.0 * PI);
     
     Some(normalized_yaw)
 }
