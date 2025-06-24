@@ -11,10 +11,12 @@ use iyes_perf_ui::prelude::PerfUiAllEntries;
 use iyes_perf_ui::PerfUiPlugin;
 use miniature_potato::geotiles_bevy::{
     handle_tile_selection, setup_hexasphere_world, tile_gizmos_system, toggle_normals,
-    HexasphereResource,
+    HexasphereResource, WorldParent,
 };
-use miniature_potato::character::{setup_character, handle_character_movement, follow_character_with_sphere_rotation, CharacterResource};
+use miniature_potato::character::{setup_character, handle_character_movement, follow_character_with_sphere_rotation, update_dead_zone_state, debug_gizmos_system, toggle_debug_gizmos, CharacterResource, DebugGizmosResource, Character, find_neighbor_in_direction, vec3_from_point};
+use serde::Deserialize;
 use std::env;
+use std::fs;
 
 /// Resource to track screenshot timing
 #[derive(Resource)]
@@ -24,24 +26,156 @@ struct ScreenshotTimer {
     exit_timer: Option<Timer>,
 }
 
+/// Event for automated testing commands
+#[derive(Event, Clone)]
+pub struct AutomatedTestEvent {
+    pub command_type: TestCommandType,
+    pub description: String,
+}
+
+#[derive(Clone)]
+pub enum TestCommandType {
+    ToggleGizmos,
+    MoveRight,
+    MoveLeft,
+    MoveUp,
+    MoveDown,
+}
+
+#[derive(Deserialize)]
+struct TestConfig {
+    commands: Vec<TestCommandConfig>,
+}
+
+#[derive(Deserialize)]
+struct TestCommandConfig {
+    command: String,
+    description: String,
+    wait_time: f32,
+}
+
+/// Resource for automated testing
+#[derive(Resource)]
+struct AutomatedTester {
+    commands: Vec<TestCommand>,
+    current_command: usize,
+    command_timer: Timer,
+    screenshot_timer: Timer,
+    waiting_for_screenshot: bool,
+}
+
+#[derive(Clone)]
+struct TestCommand {
+    command_type: TestCommandType,
+    description: String,
+    wait_time: f32, // Time to wait before taking screenshot
+}
+
+impl AutomatedTester {
+    fn new() -> Self {
+        let commands = Self::load_commands_from_file();
+
+        Self {
+            commands,
+            current_command: 0,
+            command_timer: Timer::from_seconds(1.0, TimerMode::Once), // Initial delay
+            screenshot_timer: Timer::from_seconds(0.5, TimerMode::Once),
+            waiting_for_screenshot: false,
+        }
+    }
+    
+    fn load_commands_from_file() -> Vec<TestCommand> {
+        let config_path = "test_commands_simple.yaml";
+        
+        match fs::read_to_string(config_path) {
+            Ok(content) => {
+                match serde_yaml::from_str::<TestConfig>(&content) {
+                    Ok(config) => {
+                        println!("📄 Loaded {} commands from {}", config.commands.len(), config_path);
+                        config.commands.into_iter().map(|cmd| {
+                            let command_type = match cmd.command.as_str() {
+                                "toggle_gizmos" => TestCommandType::ToggleGizmos,
+                                "move_right" => TestCommandType::MoveRight,
+                                "move_left" => TestCommandType::MoveLeft,
+                                "move_up" => TestCommandType::MoveUp,
+                                "move_down" => TestCommandType::MoveDown,
+                                // Support old commands for backward compatibility
+                                "move_forward" => TestCommandType::MoveUp,
+                                "move_backward" => TestCommandType::MoveDown,
+                                _ => {
+                                    println!("⚠️ Unknown command type: {}, defaulting to move_right", cmd.command);
+                                    TestCommandType::MoveRight
+                                }
+                            };
+                            
+                            TestCommand {
+                                command_type,
+                                description: cmd.description,
+                                wait_time: cmd.wait_time,
+                            }
+                        }).collect()
+                    }
+                    Err(e) => {
+                        println!("⚠️ Failed to parse {}: {}", config_path, e);
+                        Self::fallback_commands()
+                    }
+                }
+            }
+            Err(e) => {
+                println!("⚠️ Failed to read {}: {}", config_path, e);
+                Self::fallback_commands()
+            }
+        }
+    }
+    
+    fn fallback_commands() -> Vec<TestCommand> {
+        println!("📄 Using fallback test commands");
+        vec![
+            TestCommand {
+                command_type: TestCommandType::ToggleGizmos,
+                description: "Enable debug gizmos".to_string(),
+                wait_time: 0.5,
+            },
+            TestCommand {
+                command_type: TestCommandType::MoveUp,
+                description: "Move up 1".to_string(),
+                wait_time: 1.0,
+            },
+            TestCommand {
+                command_type: TestCommandType::MoveUp,
+                description: "Move up 2".to_string(),
+                wait_time: 1.0,
+            },
+            TestCommand {
+                command_type: TestCommandType::MoveUp,
+                description: "Move up 3".to_string(),
+                wait_time: 1.0,
+            },
+        ]
+    }
+}
+
 static TEXT_COLOR: Color = Color::srgb(0.9, 0.9, 0.9);
 const TEXT_SIZE: f32 = 15.0;
 
 fn main() {
     println!("🚀 Starting miniature-potato with geotiles geodesic polyhedron");
 
-    // Check for screenshot flag
+    // Check for flags
     let args: Vec<String> = env::args().collect();
     let screenshot_mode = args.contains(&"--screenshot".to_string());
+    let test_mode = args.contains(&"--test".to_string());
 
     if screenshot_mode {
         println!("📸 Screenshot mode enabled - will take screenshot after 2 seconds and exit");
+    } else if test_mode {
+        println!("🤖 Automated test mode enabled - will run movement commands and take screenshots");
     }
 
     let mut app = App::new();
 
-    // Configure plugins with smaller window for screenshot mode
-    if screenshot_mode {
+    // Configure plugins with smaller window for screenshot/test mode
+    if screenshot_mode || test_mode {
         app.add_plugins((DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "miniature-potato (screenshot)".to_string(),
@@ -51,12 +185,21 @@ fn main() {
             ..default()
         }),));
 
-        app.insert_resource(ScreenshotTimer {
-            timer: Timer::from_seconds(2.0, TimerMode::Once),
-            should_screenshot: true,
-            exit_timer: None,
-        })
-        .add_systems(Update, (screenshot_system,));
+        if screenshot_mode {
+            app.insert_resource(ScreenshotTimer {
+                timer: Timer::from_seconds(2.0, TimerMode::Once),
+                should_screenshot: true,
+                exit_timer: None,
+            })
+            .add_systems(Update, (screenshot_system,));
+        } else if test_mode {
+            app.add_event::<AutomatedTestEvent>()
+            .insert_resource(AutomatedTester::new())
+            .add_systems(Update, (
+                automated_test_system, 
+                handle_automated_test_events,
+            ));
+        }
     } else {
         app.add_plugins((DefaultPlugins,));
 
@@ -66,31 +209,42 @@ fn main() {
         });
     }
 
-    app.add_plugins((
+    let plugin_group = (
         WireframePlugin::default(),
         MeshPickingPlugin,
         PanOrbitCameraPlugin,
-        // we want Bevy to measure these values for us:
-        bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
-        bevy::diagnostic::EntityCountDiagnosticsPlugin,
-        bevy::diagnostic::SystemInformationDiagnosticsPlugin,
-        bevy::render::diagnostic::RenderDiagnosticsPlugin,
-        // to be shown in this plugin:
-        PerfUiPlugin,
-    ));
+    );
+    
+    // Only add performance diagnostics in normal mode (not test mode)
+    if !test_mode {
+        app.add_plugins((
+            plugin_group,
+            // we want Bevy to measure these values for us:
+            bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
+            bevy::diagnostic::EntityCountDiagnosticsPlugin,
+            bevy::diagnostic::SystemInformationDiagnosticsPlugin,
+            bevy::render::diagnostic::RenderDiagnosticsPlugin,
+            // to be shown in this plugin:
+            PerfUiPlugin,
+        ));
+    } else {
+        app.add_plugins(plugin_group);
+    }
 
-    // Initialize character resource
+    // Initialize character resource (needed in all modes)
     app.insert_resource(CharacterResource { 
         entity: None,
-        last_rotation_time: 0.0,
     });
+    
+    // Initialize debug gizmos resource
+    app.insert_resource(DebugGizmosResource::default());
 
     app.add_systems(
         Startup,
         (
             setup_hexasphere_world,
             setup_character.after(setup_hexasphere_world),
-            setup_ui,
+            move |commands: Commands| setup_ui(commands, test_mode),
             setup_camera,
             setup_lighting,
         ),
@@ -107,7 +261,10 @@ fn main() {
             handle_tile_selection,
             handle_character_movement,
             follow_character_with_sphere_rotation.after(handle_character_movement),
+            update_dead_zone_state.after(follow_character_with_sphere_rotation),
             tile_gizmos_system,
+            debug_gizmos_system.after(update_dead_zone_state),
+            toggle_debug_gizmos,
             update_hovered_tile_ui,
             update_selected_tile_ui,
             update_sphere_info_ui,
@@ -339,21 +496,31 @@ fn setup_lighting(mut commands: Commands) {
 }
 
 /// Setup the UI with on-screen controls help and tile info displays
-fn setup_ui(mut commands: Commands) {
-    commands.spawn(PerfUiAllEntries::default());
+fn setup_ui(mut commands: Commands, test_mode: bool) {
+    // Don't show performance UI in test mode
+    if !test_mode {
+        commands.spawn(PerfUiAllEntries::default());
+    }
 
-    // Controls help in top-left
+    // Controls help in top-left (simplified in test mode)
+    let controls_text = if test_mode {
+        "🤖 Automated Testing Mode\n\
+        Running movement commands...\n\
+        Check console for progress"
+    } else {
+        "Controls:\n\
+        * Mouse wheel: Zoom camera\n\
+        * Left click: Select/deselect tile\n\
+        * WASD: Move character\n\
+        * Space: Toggle wireframe mode\n\
+        * N: Toggle normal visualization\n\
+        * G: Toggle debug axes gizmos\n\
+        * I: Print hexasphere info\n\
+        * Esc: Quit"
+    };
+    
     commands.spawn((
-        Text::new(
-            "Controls:\n\
-            * Mouse wheel: Zoom camera\n\
-            * Left click: Select/deselect tile\n\
-            * WASD: Move character\n\
-            * Space: Toggle wireframe mode\n\
-            * N: Toggle normal visualization\n\
-            * I: Print hexasphere info\n\
-            * Esc: Quit",
-        ),
+        Text::new(controls_text),
         TextFont {
             font_size: TEXT_SIZE,
             ..default()
@@ -427,6 +594,7 @@ fn setup_ui(mut commands: Commands) {
         });
 
     println!("   Run with --screenshot flag to auto-capture screenshot and exit");
+    println!("   Run with --test flag to run automated movement testing with screenshots");
 }
 
 /// System to handle automatic screenshot capture and exit
@@ -490,6 +658,189 @@ fn screenshot_system(
         if exit_timer.just_finished() {
             println!("⏰ Exit timer finished, shutting down...");
             exit.write(AppExit::Success);
+        }
+    }
+}
+
+/// System to run automated movement tests and capture screenshots
+fn automated_test_system(
+    time: Res<Time>,
+    mut tester: ResMut<AutomatedTester>,
+    mut commands: Commands,
+    mut test_events: EventWriter<AutomatedTestEvent>,
+    windows: Query<Entity, With<Window>>,
+    mut exit: EventWriter<AppExit>,
+) {
+    // Check if we've completed all commands
+    if tester.current_command >= tester.commands.len() {
+        // Wait a bit before exiting
+        if !tester.waiting_for_screenshot {
+            println!("🎉 All automated tests completed! Exiting in 2 seconds...");
+            tester.waiting_for_screenshot = true;
+            tester.screenshot_timer = Timer::from_seconds(2.0, TimerMode::Once);
+        }
+        
+        tester.screenshot_timer.tick(time.delta());
+        if tester.screenshot_timer.just_finished() {
+            exit.write(AppExit::Success);
+        }
+        return;
+    }
+
+    if tester.waiting_for_screenshot {
+        // We're waiting to take a screenshot after the last command
+        tester.screenshot_timer.tick(time.delta());
+        
+        if tester.screenshot_timer.just_finished() {
+            // Take screenshot
+            let command = &tester.commands[tester.current_command];
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            
+            let filename = format!("test_{:02}_{}.png", tester.current_command, timestamp);
+            
+            println!("📸 Taking test screenshot: {} ({})", filename, command.description);
+            
+            if let Ok(window_entity) = windows.single() {
+                use bevy::render::camera::RenderTarget;
+                use bevy::window::WindowRef;
+                commands
+                    .spawn(Screenshot(RenderTarget::Window(WindowRef::Entity(window_entity))))
+                    .observe(save_to_disk(filename));
+            }
+            
+            // Move to next command
+            tester.current_command += 1;
+            tester.waiting_for_screenshot = false;
+            tester.command_timer = Timer::from_seconds(1.0, TimerMode::Once); // Wait before next command
+        }
+    } else {
+        // We're waiting to execute the next command
+        tester.command_timer.tick(time.delta());
+        
+        if tester.command_timer.just_finished() {
+            if tester.current_command < tester.commands.len() {
+                let command = &tester.commands[tester.current_command].clone();
+                
+                println!("🤖 Executing test command {}: {}", tester.current_command + 1, command.description);
+                
+                // Send test event
+                test_events.write(AutomatedTestEvent {
+                    command_type: command.command_type.clone(),
+                    description: command.description.clone(),
+                });
+                
+                // Set up screenshot timer
+                tester.waiting_for_screenshot = true;
+                tester.screenshot_timer = Timer::from_seconds(command.wait_time, TimerMode::Once);
+            }
+        }
+    }
+}
+
+/// System to handle automated test events and trigger actions
+fn handle_automated_test_events(
+    mut test_events: EventReader<AutomatedTestEvent>,
+    mut debug_gizmos: ResMut<DebugGizmosResource>,
+    hexasphere_res: Option<Res<HexasphereResource>>,
+    world_parent_query: Query<&Transform, (With<WorldParent>, Without<Character>)>,
+    mut character_query: Query<(&mut Character, &mut Transform)>,
+) {
+    for event in test_events.read() {
+        println!("🔧 Processing automated test event: {}", event.description);
+        
+        match event.command_type {
+            TestCommandType::ToggleGizmos => {
+                debug_gizmos.show_axes = !debug_gizmos.show_axes;
+                debug_gizmos.show_dead_zone = debug_gizmos.show_axes; // Same state as axes
+                println!("Debug gizmos: {} (axes: {}, dead zone: {})", 
+                         if debug_gizmos.show_axes { "ON" } else { "OFF" },
+                         debug_gizmos.show_axes,
+                         debug_gizmos.show_dead_zone);
+            },
+            TestCommandType::MoveRight => {
+                simulate_movement(KeyCode::KeyD, &hexasphere_res, &world_parent_query, &mut character_query);
+            },
+            TestCommandType::MoveLeft => {
+                simulate_movement(KeyCode::KeyA, &hexasphere_res, &world_parent_query, &mut character_query);
+            },
+            TestCommandType::MoveUp => {
+                simulate_movement(KeyCode::KeyW, &hexasphere_res, &world_parent_query, &mut character_query);
+            },
+            TestCommandType::MoveDown => {
+                simulate_movement(KeyCode::KeyS, &hexasphere_res, &world_parent_query, &mut character_query);
+            },
+        }
+    }
+}
+
+/// Helper function to simulate movement without keyboard input
+fn simulate_movement(
+    key: KeyCode,
+    hexasphere_res: &Option<Res<HexasphereResource>>,
+    world_parent_query: &Query<&Transform, (With<WorldParent>, Without<Character>)>,
+    character_query: &mut Query<(&mut Character, &mut Transform)>,
+) {
+    // Functions already imported at module level
+    
+    if let Some(hexasphere) = hexasphere_res {
+        if let (Ok((mut character, mut transform)), Ok(world_transform)) = 
+            (character_query.single_mut(), world_parent_query.single()) {
+            
+            let current_tile_index = character.current_tile;
+            
+            // Get current tile
+            if let Some(current_tile) = hexasphere.hexasphere.tiles.get(current_tile_index) {
+                // Get tile center and transform it by world rotation to get actual world position
+                let local_center = vec3_from_point(&current_tile.center_point);
+                let current_center = world_transform.transform_point(local_center);
+                
+                // Define movement directions in camera space (camera looks down -Z)
+                let camera_relative_direction = match key {
+                    KeyCode::KeyW => Some(Vec3::Y),  // Up (toward top of screen/sphere)
+                    KeyCode::KeyS => Some(-Vec3::Y), // Down (toward bottom of screen/sphere)
+                    KeyCode::KeyA => Some(-Vec3::X), // Left
+                    KeyCode::KeyD => Some(Vec3::X),  // Right
+                    _ => None,
+                };
+                
+                if let Some(camera_direction) = camera_relative_direction {
+                    // Use camera direction directly in world space - don't apply world rotation
+                    // This keeps WASD movement consistent relative to camera view regardless of world rotation
+                    let world_direction = camera_direction;
+                    
+                    // Project the desired direction onto the sphere's tangent plane at current position
+                    let normal = current_center.normalize(); // Surface normal at current position
+                    let tangent_direction = (world_direction - normal * world_direction.dot(normal)).normalize();
+                    
+                    // Find the neighbor that best matches this direction
+                    if let Some(target_tile_index) = find_neighbor_in_direction(current_tile, tangent_direction, &hexasphere.hexasphere, world_transform) {
+                        if let Some(target_tile) = hexasphere.hexasphere.tiles.get(target_tile_index) {
+                            // Transform target tile center to world space
+                            let local_target_center = vec3_from_point(&target_tile.center_point);
+                            let target_center = world_transform.transform_point(local_target_center);
+                            let new_position = target_center + target_center.normalize() * character.hover_height;
+                            
+                            // Convert world position back to local space relative to world parent
+                            // Create inverse transform manually
+                            let inv_rotation = world_transform.rotation.inverse();
+                            let inv_translation = inv_rotation * (-world_transform.translation);
+                            let local_position = inv_rotation * new_position + inv_translation;
+                            
+                            // Update character position and current tile
+                            transform.translation = local_position;
+                            character.current_tile = target_tile_index;
+                            
+                            let tile_type = if target_tile.boundary.len() == 5 { "pentagon" } else { "hexagon" };
+                            println!("🚶 Character moved to {} tile #{}", tile_type, target_tile_index);
+                        }
+                    } else {
+                        println!("🚫 No valid neighbor found in that direction");
+                    }
+                }
+            }
         }
     }
 }
