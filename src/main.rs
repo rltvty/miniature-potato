@@ -6,7 +6,6 @@ use bevy::picking::pointer::PointerInteraction;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use bevy::window::WindowPlugin;
-use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use iyes_perf_ui::prelude::PerfUiAllEntries;
 use iyes_perf_ui::PerfUiPlugin;
 use miniature_potato::geotiles_bevy::{
@@ -212,7 +211,6 @@ fn main() {
     let plugin_group = (
         WireframePlugin::default(),
         MeshPickingPlugin,
-        PanOrbitCameraPlugin,
     );
     
     // Only add performance diagnostics in normal mode (not test mode)
@@ -447,20 +445,10 @@ struct SelectedTileText;
 struct SphereInfoText;
 
 fn setup_camera(mut commands: Commands) {
+    // Spawn a camera looking at the entities to show what's happening in this example.
     commands.spawn((
-        Transform::from_translation(Vec3::new(0.0, 15.0, 0.0)),
-        PanOrbitCamera {
-            // Fixed camera position looking at the sphere
-            // Sphere rotation will handle keeping character centered
-            yaw: Some(0.0),
-            target_yaw: 0.0,
-            // Keep pitch locked to maintain view angle
-            pitch_upper_limit: Some(0.0),
-            pitch_lower_limit: Some(0.0),
-            // Disable manual orbit controls since sphere handles rotation
-            orbit_sensitivity: 0.0,
-            ..default()
-        },
+        Camera3d::default(),
+        Transform::from_xyz(0.0, 0.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }
 

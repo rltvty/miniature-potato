@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 // Configuration
 const SPHERE_RADIUS: f64 = 5.0;
-const SUBDIVISIONS: usize = 10;
+const SUBDIVISIONS: usize = 20;
 const TILE_SIZE: f64 = 0.99;
 const TILE_THICKNESS: f64 = 0.1;
 const TILE_SHAPE: TileShape = TileShape::Exact;

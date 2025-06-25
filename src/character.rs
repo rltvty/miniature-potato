@@ -253,7 +253,7 @@ fn draw_dead_zone_gizmo(
     // Draw a circle on the sphere surface to show the dead zone
     // Position it at the front face of the sphere (facing camera)
     let sphere_radius = 5.0; // Same as SPHERE_RADIUS in geotiles_bevy.rs
-    let dead_zone_degrees: f32 = 20.0;
+    let dead_zone_degrees: f32 = 30.0;
     let dead_zone_radius = sphere_radius * (dead_zone_degrees.to_radians()).sin();
     
     // Use the stored state from the rotation system for consistent coloring
