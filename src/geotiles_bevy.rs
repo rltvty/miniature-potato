@@ -4,13 +4,14 @@ use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use geotiles::{Hexasphere, Point, RegularHexagonParams, ThickTile, TileInstance, Vector3};
 use std::f32::consts::PI;
+use std::collections::HashSet;
 
 // Configuration
 const SPHERE_RADIUS: f64 = 5.0;
-const SUBDIVISIONS: usize = 10;
+const SUBDIVISIONS: usize = 20;
 const TILE_SIZE: f64 = 0.99;
 const TILE_THICKNESS: f64 = 0.1;
-const TILE_SHAPE: TileShape = TileShape::Simplified;
+const TILE_SHAPE: TileShape = TileShape::Exact;
 const MAX_SIMPLIFIED_SHAPES: usize = 200;
 const SIMPLIFIED_SHAPE_TOLERANCE: f64 = 0.001;
 const USE_THICK_TILES: bool = false;
@@ -23,6 +24,14 @@ enum TileShape {
     Exact,
 }
 
+/// Component to mark the grand parent entity (contains both sphere and character)
+#[derive(Component)]
+pub struct WorldParent;
+
+/// Component to mark the sphere parent entity
+#[derive(Component)]
+pub struct SphereParent;
+
 /// Resource to store the hexasphere and related data
 #[derive(Resource)]
 pub struct HexasphereResource {
@@ -30,8 +39,10 @@ pub struct HexasphereResource {
     pub thick_tiles: Vec<ThickTile>,
     pub uniform_radius: f64,
     pub tile_entities: Vec<Entity>,
+    pub world_parent: Entity,
+    pub sphere_parent: Entity,
     pub hovered_tile: Option<usize>,
-    pub selected_tile: Option<usize>,
+    pub selected_tiles: HashSet<usize>,
 }
 
 /// Component to mark tile entities
@@ -46,6 +57,7 @@ struct TileMaterials {
     normal: Handle<StandardMaterial>,
     hover: Handle<StandardMaterial>,
 }
+
 
 fn vec3_from_point(p: &Point) -> Vec3 {
     Vec3::new(p.x as f32, p.y as f32, p.z as f32)
@@ -110,6 +122,7 @@ fn get_material(
 
 fn add_entity(
     commands: &mut Commands,
+    sphere_parent: Entity,
     tile_entities: &mut Vec<Entity>,
     mesh: Handle<Mesh>,
     material: Handle<StandardMaterial>,
@@ -127,6 +140,7 @@ fn add_entity(
             },
             transform,
             tile_component,
+            ChildOf(sphere_parent),
         ))
         .observe(on_tile_hover)
         .observe(on_tile_out)
@@ -169,6 +183,22 @@ pub fn setup_hexasphere_world(
         LinearRgba::rgb(0.5, 0.5, 0.0),
     ); // Yellow
 
+    // Create grand parent entity for the entire world (sphere + character)
+    let world_parent = commands.spawn((
+        Transform::default(),
+        Visibility::default(),
+        WorldParent,
+    )).id();
+
+    // Create sphere parent entity as child of world parent
+    let sphere_parent = commands.spawn((
+        Transform::default(),
+        Visibility::default(),
+        SphereParent,
+        ChildOf(world_parent),
+    )).id();
+
+    // Create all tiles as children of the sphere parent
     match TILE_SHAPE {
         TileShape::Uniform => {
             let approximations = hexasphere.get_regular_hexagon_approximations();
@@ -189,6 +219,7 @@ pub fn setup_hexasphere_world(
 
                 add_entity(
                     &mut commands,
+                    sphere_parent,
                     &mut tile_entities,
                     mesh.clone(),
                     hexagon_material.clone(),
@@ -260,6 +291,7 @@ pub fn setup_hexasphere_world(
 
                 add_entity(
                     &mut commands,
+                    sphere_parent,
                     &mut tile_entities,
                     mesh,
                     material,
@@ -291,6 +323,7 @@ pub fn setup_hexasphere_world(
 
                 add_entity(
                     &mut commands,
+                    sphere_parent,
                     &mut tile_entities,
                     mesh,
                     material,
@@ -308,8 +341,10 @@ pub fn setup_hexasphere_world(
         thick_tiles,
         uniform_radius,
         tile_entities: tile_entities.clone(),
+        world_parent,
+        sphere_parent,
         hovered_tile: None,
-        selected_tile: None,
+        selected_tiles: HashSet::new(),
     });
     let tile_count = tile_entities.len();
     println!(
@@ -322,6 +357,7 @@ pub fn setup_hexasphere_world(
         show_normals: false,
     });
 }
+
 
 fn on_tile_hover(
     trigger: Trigger<Pointer<Over>>,
@@ -365,13 +401,13 @@ pub fn handle_tile_selection(
     if mouse_input.just_pressed(MouseButton::Left) {
         if let Some(hovered_index) = hexasphere_res.hovered_tile {
             // Toggle selection
-            if hexasphere_res.selected_tile == Some(hovered_index) {
+            if hexasphere_res.selected_tiles.contains(&hovered_index) {
                 // Deselect
-                hexasphere_res.selected_tile = None;
-                println!("🎯 Deselected tile");
+                hexasphere_res.selected_tiles.remove(&hovered_index);
+                println!("🎯 Deselected tile {}", hovered_index);
             } else {
                 // Select
-                hexasphere_res.selected_tile = Some(hovered_index);
+                hexasphere_res.selected_tiles.insert(hovered_index);
                 if let Some(tile) = hexasphere_res.hexasphere.tiles.get(hovered_index) {
                     println!(
                         "🎯 Selected {} tile {}",
@@ -384,6 +420,7 @@ pub fn handle_tile_selection(
                     );
                 }
             }
+            println!("📊 Total selected tiles: {}", hexasphere_res.selected_tiles.len());
         }
     }
 }
@@ -404,7 +441,7 @@ pub fn tile_gizmos_system(
         // Apply sphere rotation to get current world position
         let rotated_center = original_center;
 
-        let is_selected = hexasphere_res.selected_tile == Some(index);
+        let is_selected = hexasphere_res.selected_tiles.contains(&index);
 
         // Draw selection highlight as a wireframe outline with rotation applied
         if is_selected {

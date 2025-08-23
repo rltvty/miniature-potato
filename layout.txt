@@ -1,0 +1,24 @@
+subdivisions 0 - invalid. we should panic if subdivisions is less than 1.
+subdivisions 1 - Only pentagons, no hexagons
+subdivisions 2 - 1 hexagons between each pentagon pair. 
+subdivisions 3 - 2 hexagons between each pentagon pair. 1 additional hexagon inside of each pentagon triplet. 1 hexagon that is eqidistant from each pentagon in the triplet. 80 hexagons total. 5 hexagons around each pentagon, 20 additional hexagons that are equidistant between 2 or 3 pentagons.    (1 tile out from each pentagon edge, 0 tiles in triangle out from each pentagon vertex)*5 = 5 hexagons
+subdivisions 4 - 3 hexagons between each pentagon pair. 3 additional hexagons inside of each pentagon triplet. 0 hexagons that are equidistant from any pair or triplet of pentagons. 150 hexagons total. 10 hexagons around each pentagon, 30 additional hexagons that are equidistant betwen 2 or 3 pentagons. (1 tiles out from each pentagon edge, 1 tile in triangle out from each pentagon vertex) * 5 = 10 hexagons
+subdivisions 5 - 4 hexagons between each pentagon pair. 6 additional hexagons inside of each pentagon triplet. 3 hexagons that are equistant from 2 pentagons each, in each triplet. 240 hexagons total. 15 hexagons around each pentagon, 60 additional hexagons that are equidistant between 2 or 3 pentagons. (2 tiles out from each pentagon edge, 1 tiles in triangle out from each pentagon vertex)* 5 = 15 hexagons.
+subdivisions 6 - 5 hexagons between each pentagon pair. 10 additional hexagons inside of each pentagon triplet. 1 hexagon that is equidistant from each pentagon in the triplet. 350 hexagons total. 25 hexagons around each pentagon, 50 additional hexagons that are equidistant between 2 or 3 pentagons.  (2 tiles out from each pentagon edge, 3 tiles in triangle out from each pentagon vertex) * 5 = 25 hexagons.
+subdivisions 7 - 6 hexagons between each pentagon pair. 15 additional hexagons inside of each pentagon triplet. 3 hexagons that are equidistant from 2 pentagons each, in each triplet. 480 hexagons total. 35 hexagons around each pentagon, 60 additional hexagons that are equidistant between 2 pentagons. (3 tiles out from each pentagon edge, 4 tiles in diamond out from each pentagon vertex) * 5 = 35 hexagons.
+subdivisions 8 - 7 hexagons between each pentagon pair. 21 additional hexagons inside of each pentagon triplet. 3 hexagons that are equidistant from 2 pentagons each, in each triplet. 630 hexagons total. 45 hexagons around each pentagon, 90 additional hexagons that are equidistant between 2 pentagons. (3 tiles out from each pentagon edge, 6 tiles in triangle out from each pentagon vetrex) * 5 = 45 hexagons.
+subdivisions 9 - 8 hexagons between each pentagon pair. 28 additional hexagons inside of each pentagon triplet. 3 hexagons that are equidistant from 2 pentagons each, 1 hexgaon in the center of the triplet. 800 hexagons total. 
+
+
+
+
+lets try to make an actual implmenetation that uses symmetry to generate the mapping on the sphere.\                   │
+│   \                                                                                                                                   │
+│   Lets break the algorithm into 2 parts: first the tiles directly between 2 pentagons, wrapping along the pentagon edges to the next  │
+│   pentagon. There is always n-1 hexagons between pentagons for n divisions.  we need to build this for one line between 2             │
+│   pentagons, and then we can use symmettry to map it to every other pair of pentagons. \                                              │
+│   \                                                                                                                                   │
+│   Then we need to build the triangle of hexagons between triples of pentagons. at subdivision 3, this is 1 hexagon, and subdivision   │
+│   4, this is 3 hexagons, at subdivision 5 it is 6 hexagons, at subdivision 6 it is 10 hexagons.  It is always the triangle count of   │
+│   hexagons for a triangle with size (n-2) .  We need to make this mapping once, and then translate around the sphere to the other 19  │
+│   pentagon triplets.   
